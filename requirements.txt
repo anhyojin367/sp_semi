@@ -1,0 +1,14 @@
+streamlit>=1.46
+pypdf
+pypdfium2
+pillow
+
+pymupdf>=1.24
+pdfplumber>=0.11
+pytesseract>=0.3.10
+scikit-learn>=1.5
+google-genai>=1.0.0
+pydantic>=2.8
+python-dotenv>=1.0
+openpyxl
+PyYAML>=6.0.0

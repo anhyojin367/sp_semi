@@ -1,0 +1,265 @@
+{
+  "documents": {
+    "0b0319021422492c9a7b97c212c7f37a2265aff0780817641b57f60e7ed43a8d": {
+      "status": "completed",
+      "cache_version": "sp-app-direct-bridge-v33-20260624-invitro-partial-table",
+      "artifact_key": "057e060c2d9df1b94861d83b",
+      "pdf_path": "incoming_sp_pdfs\\accounts\\ehruddlrk_gmail.com_4d6ba028\\20260622_220450_스카이코비원멀티주_더미데이터_6_2.pdf",
+      "pdf_sig": {
+        "size": 475407,
+        "mtime_ns": 1782302428574540700
+      },
+      "updated_at": "2026-06-24T23:27:55",
+      "summary_counts": {
+        "pass": 92,
+        "fail": 1,
+        "hold": 0,
+        "total": 93
+      },
+      "summary_before_path": "C:\\Users\\User\\Desktop\\SP_UI_0612_20260624_v20_final_page_integrated_loq_count_full\\.sp_judgement_status\\057e060c2d9df1b94861d83b\\summary_before.csv",
+      "summary_after_path": "C:\\Users\\User\\Desktop\\SP_UI_0612_20260624_v20_final_page_integrated_loq_count_full\\.sp_judgement_status\\057e060c2d9df1b94861d83b\\summary_after.csv",
+      "permit_paths": []
+    },
+    "72dace26b2d0887b74732558301c79dddc3b0c41d18fa42eb91ef127accde844": {
+      "status": "completed",
+      "cache_version": "sp-app-direct-bridge-v34-20260624-rag-data-unified-judge",
+      "artifact_key": "180231292a25e4986859d70b",
+      "pdf_path": "incoming_sp_pdfs\\accounts\\ehruddlrk_gmail.com_4d6ba028\\20260622_220504_스카이코비원멀티주_더미데이터_7_2.pdf",
+      "pdf_sig": {
+        "size": 478849,
+        "mtime_ns": 1782302426660167500
+      },
+      "updated_at": "2026-06-25T12:47:01",
+      "summary_counts": {
+        "pass": 93,
+        "fail": 0,
+        "hold": 0,
+        "total": 93
+      },
+      "summary_before_path": "C:\\Users\\User\\Desktop\\SP_UI_0612_20260624_v20_final_page_integrated_loq_count_full\\.sp_judgement_status\\180231292a25e4986859d70b\\summary_before.csv",
+      "summary_after_path": "C:\\Users\\User\\Desktop\\SP_UI_0612_20260624_v20_final_page_integrated_loq_count_full\\.sp_judgement_status\\180231292a25e4986859d70b\\summary_after.csv",
+      "permit_paths": []
+    },
+    "0bf0db4f2913a64b9eaf2801b5ae69a8327bc5e11386343e62010541a285fdb1": {
+      "status": "completed",
+      "cache_version": "sp-app-direct-bridge-v34-20260624-rag-data-unified-judge",
+      "artifact_key": "aaae0b673ba054e28fd0f3d9",
+      "pdf_path": "incoming_sp_pdfs\\accounts\\ehruddlrk_gmail.com_4d6ba028\\20260622_145435_스카이코비원멀티주_허가서검증 가라본 (1)_2.pdf",
+      "pdf_sig": {
+        "size": 639452,
+        "mtime_ns": 1782302444453982800
+      },
+      "updated_at": "2026-06-25T21:31:22",
+      "summary_counts": {
+        "pass": 74,
+        "fail": 14,
+        "hold": 7,
+        "total": 95
+      },
+      "summary_before_path": "C:\\Users\\User\\Desktop\\SP_UI_0612_20260624_v20_final_page_integrated_loq_count_full\\.sp_judgement_status\\aaae0b673ba054e28fd0f3d9\\summary_before.csv",
+      "summary_after_path": "C:\\Users\\User\\Desktop\\SP_UI_0612_20260624_v20_final_page_integrated_loq_count_full\\.sp_judgement_status\\aaae0b673ba054e28fd0f3d9\\summary_after.csv",
+      "permit_paths": [
+        "incoming_sp_pdfs\\accounts\\ehruddlrk_gmail.com_4d6ba028\\20260622_145435_코로나바이러스_허가서 (1)_2.pdf"
+      ]
+    },
+    "39f7f432d4c416f80e4c9398abf480f0551162326cb57f8d7093c8128249be48": {
+      "status": "completed",
+      "cache_version": "sp-app-direct-bridge-v34-20260624-rag-data-unified-judge",
+      "artifact_key": "1f92a6621818218066bd6c38",
+      "pdf_path": "incoming_sp_pdfs\\accounts\\ehruddlrk_gmail.com_4d6ba028\\20260622_145435_스카이코비원멀티주_허가서검증 가라본 (1)_2.pdf",
+      "pdf_sig": {
+        "size": 639452,
+        "mtime_ns": 1782302444000000000
+      },
+      "updated_at": "2026-06-29T20:12:29",
+      "summary_counts": {
+        "pass": 78,
+        "fail": 15,
+        "hold": 2,
+        "total": 95
+      },
+      "summary_before_path": "C:\\Users\\User\\Desktop\\SP_main\\sp_main\\.sp_judgement_status\\1f92a6621818218066bd6c38\\summary_before.csv",
+      "summary_after_path": "C:\\Users\\User\\Desktop\\SP_main\\sp_main\\.sp_judgement_status\\1f92a6621818218066bd6c38\\summary_after.csv",
+      "permit_paths": [
+        "incoming_sp_pdfs\\accounts\\ehruddlrk_gmail.com_4d6ba028\\20260622_145435_코로나바이러스_허가서 (1)_2.pdf"
+      ]
+    },
+    "2f79e2604da9514ec34633af9e81143c43f809bf7b753a38901ce5b3481bca3b": {
+      "status": "completed",
+      "cache_version": "sp-app-direct-bridge-v34-20260624-rag-data-unified-judge",
+      "artifact_key": "2f8dc6f278c203fef015a1d8",
+      "pdf_path": "incoming_sp_pdfs\\accounts\\ehruddlrk_gmail.com_4d6ba028\\20260622_220504_스카이코비원멀티주_더미데이터_7_2.pdf",
+      "pdf_sig": {
+        "size": 478849,
+        "mtime_ns": 1782302426000000000
+      },
+      "updated_at": "2026-06-29T17:11:50",
+      "summary_counts": {
+        "pass": 93,
+        "fail": 0,
+        "hold": 0,
+        "total": 93
+      },
+      "summary_before_path": "C:\\Users\\User\\Desktop\\SP_main\\sp_main\\.sp_judgement_status\\2f8dc6f278c203fef015a1d8\\summary_before.csv",
+      "summary_after_path": "C:\\Users\\User\\Desktop\\SP_main\\sp_main\\.sp_judgement_status\\2f8dc6f278c203fef015a1d8\\summary_after.csv",
+      "permit_paths": []
+    },
+    "4a1a57d6efb2b102e010793cbfcb1b705b7b7d00c594eba20e9bbee6141d4d2e": {
+      "status": "completed",
+      "cache_version": "sp-app-direct-bridge-v34-20260624-rag-data-unified-judge",
+      "artifact_key": "c4fdd1e9e1327a5908d9984b",
+      "pdf_path": "incoming_sp_pdfs\\accounts\\ehruddlrk_gmail.com_4d6ba028\\20260622_220504_스카이코비원멀티주_더미데이터_7_2.pdf",
+      "pdf_sig": {
+        "size": 478849,
+        "mtime_ns": 1782302426000000000
+      },
+      "updated_at": "2026-06-29T20:37:36",
+      "summary_counts": {
+        "pass": 95,
+        "fail": 0,
+        "hold": 0,
+        "total": 95
+      },
+      "summary_before_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\c4fdd1e9e1327a5908d9984b\\summary_before.csv",
+      "summary_after_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\c4fdd1e9e1327a5908d9984b\\summary_after.csv",
+      "permit_paths": []
+    },
+    "ec4e9f8c199c2e4b3fc5d66f330fd5486228b44632af0236e3dc8ce638d2d134": {
+      "status": "completed",
+      "cache_version": "sp-app-direct-bridge-v34-20260624-rag-data-unified-judge",
+      "artifact_key": "11f7ca6825a51fa74d4524ee",
+      "pdf_path": "incoming_sp_pdfs\\accounts\\ehruddlrk_gmail.com_4d6ba028\\20260622_145435_스카이코비원멀티주_허가서검증 가라본 (1)_2.pdf",
+      "pdf_sig": {
+        "size": 639452,
+        "mtime_ns": 1782302444000000000
+      },
+      "updated_at": "2026-06-29T20:44:09",
+      "summary_counts": {
+        "pass": 75,
+        "fail": 14,
+        "hold": 6,
+        "total": 95
+      },
+      "summary_before_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\11f7ca6825a51fa74d4524ee\\summary_before.csv",
+      "summary_after_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\11f7ca6825a51fa74d4524ee\\summary_after.csv",
+      "permit_paths": [
+        "incoming_sp_pdfs\\accounts\\ehruddlrk_gmail.com_4d6ba028\\20260622_145435_코로나바이러스_허가서 (1)_2.pdf"
+      ]
+    },
+    "f6d31e0086ccaa6910d209268a3e2c904aeb2f56b4050947eafd1b84ea13b0d1": {
+      "status": "completed",
+      "cache_version": "sp-app-direct-bridge-v34-20260624-rag-data-unified-judge",
+      "artifact_key": "a420cb1285116bca7d0236ad",
+      "pdf_path": "incoming_sp_pdfs\\accounts\\ehruddlrk_gmail.com_4d6ba028\\20260629_201527_[중간보고회] 스카이코비원멀티주 더미데이터_ 제조일자, 제조수량, 로트번호 오류_시험결과_적합기재.pdf",
+      "pdf_sig": {
+        "size": 463763,
+        "mtime_ns": 1782731760000000000
+      },
+      "updated_at": "2026-06-29T21:57:55",
+      "summary_counts": {
+        "pass": 95,
+        "fail": 0,
+        "hold": 0,
+        "total": 95
+      },
+      "summary_before_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\a420cb1285116bca7d0236ad\\summary_before.csv",
+      "summary_after_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\a420cb1285116bca7d0236ad\\summary_after.csv",
+      "permit_paths": [
+        "incoming_sp_pdfs\\accounts\\ehruddlrk_gmail.com_4d6ba028\\20260629_201527_스카이코비원멀티주_허가서1.pdf",
+        "incoming_sp_pdfs\\accounts\\ehruddlrk_gmail.com_4d6ba028\\20260629_201527_스카이코비원멀티주_허가서2.pdf"
+      ]
+    },
+    "c3f60b777a0b75c12ec767c1610732dfe91ab639f15c3f46415dad7b5382689e": {
+      "status": "completed",
+      "cache_version": "sp-app-direct-bridge-v34-20260624-rag-data-unified-judge",
+      "artifact_key": "fdada49d2f39d8339307b15e",
+      "pdf_path": "incoming_sp_pdfs\\accounts\\ehruddlrk_gmail.com_4d6ba028\\20260629_215630_[중간보고회] 스카이코비원멀티주 더미데이터_제조량, 제조번호, 제조번호 불일치_ 시험결과_불검출문구_수치 기재.pdf",
+      "pdf_sig": {
+        "size": 473391,
+        "mtime_ns": 1782737905290092500
+      },
+      "updated_at": "2026-06-30T01:08:12",
+      "summary_counts": {
+        "pass": 95,
+        "fail": 0,
+        "hold": 0,
+        "total": 95
+      },
+      "summary_before_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\fdada49d2f39d8339307b15e\\summary_before.csv",
+      "summary_after_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\fdada49d2f39d8339307b15e\\summary_after.csv",
+      "permit_paths": [
+        "incoming_sp_pdfs\\accounts\\ehruddlrk_gmail.com_4d6ba028\\20260629_215630_스카이코비원멀티주_허가서1.pdf",
+        "incoming_sp_pdfs\\accounts\\ehruddlrk_gmail.com_4d6ba028\\20260629_215630_스카이코비원멀티주_허가서2.pdf"
+      ]
+    },
+    "5e6af449f66244231dff0a8b70c52cace259c1be070fb5001ba6f9722422370a": {
+      "status": "completed",
+      "cache_version": "sp-app-direct-bridge-v34-20260624-rag-data-unified-judge",
+      "artifact_key": "690c3c67091193781d0d433b",
+      "pdf_path": "incoming_sp_pdfs\\accounts\\ehruddlrk_gmail.com_4d6ba028\\20260629_215740_[중간보고회] 스카이코비원멀티주 더미데이터_제조일자 앞섬, 제조년월일, 제조소 불일치_시험결과_확인문구_수치 기재.pdf",
+      "pdf_sig": {
+        "size": 468450,
+        "mtime_ns": 1782737900574203700
+      },
+      "updated_at": "2026-06-30T02:32:00",
+      "summary_counts": {
+        "pass": 90,
+        "fail": 2,
+        "hold": 3,
+        "total": 95
+      },
+      "summary_before_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\690c3c67091193781d0d433b\\summary_before.csv",
+      "summary_after_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\690c3c67091193781d0d433b\\summary_after.csv",
+      "permit_paths": [
+        "incoming_sp_pdfs\\accounts\\ehruddlrk_gmail.com_4d6ba028\\20260629_215740_스카이코비원멀티주_허가서1.pdf",
+        "incoming_sp_pdfs\\accounts\\ehruddlrk_gmail.com_4d6ba028\\20260629_215740_스카이코비원멀티주_허가서2.pdf"
+      ]
+    },
+    "0583d4dce288aaac91812c4f6d29b0eadaab5a058225e220b614021233f44d54": {
+      "status": "completed",
+      "cache_version": "sp-app-direct-bridge-v34-20260624-rag-data-unified-judge",
+      "artifact_key": "f289e7e8733b6b1d35cbf1a5",
+      "pdf_path": "incoming_sp_pdfs\\accounts\\aeoseo1111_gmail.com_51d07939\\20260630_021532_[중간보고회] 스카이코비원멀티주 더미데이터_ 제조일자, 제조수량, 로트번호 오류_시험결과_적합기재.pdf",
+      "pdf_sig": {
+        "size": 463763,
+        "mtime_ns": 1782753366678377600
+      },
+      "updated_at": "2026-06-30T02:19:59",
+      "summary_counts": {
+        "pass": 95,
+        "fail": 0,
+        "hold": 0,
+        "total": 95
+      },
+      "summary_before_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\f289e7e8733b6b1d35cbf1a5\\summary_before.csv",
+      "summary_after_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\f289e7e8733b6b1d35cbf1a5\\summary_after.csv",
+      "permit_paths": [
+        "incoming_sp_pdfs\\accounts\\aeoseo1111_gmail.com_51d07939\\20260630_021532_스카이코비원멀티주_허가서1.pdf",
+        "incoming_sp_pdfs\\accounts\\aeoseo1111_gmail.com_51d07939\\20260630_021532_스카이코비원멀티주_허가서2.pdf"
+      ]
+    },
+    "855520f5b211e2da3d3c99d28b1e6a3abd739a941974f3e9c00e5d81123add9a": {
+      "status": "completed",
+      "cache_version": "sp-app-direct-bridge-v34-20260624-rag-data-unified-judge",
+      "artifact_key": "e743fc735ed4eba779b2f6e8",
+      "pdf_path": "incoming_sp_pdfs\\accounts\\aeoseo1111_gmail.com_51d07939\\20260630_023112_[중간보고회] 스카이코비원멀티주 더미데이터_ 제조일자, 제조수량, 로트번호 오류_시험결과_적합기재.pdf",
+      "pdf_sig": {
+        "size": 463763,
+        "mtime_ns": 1782754333544803800
+      },
+      "updated_at": "2026-06-30T09:28:47",
+      "summary_counts": {
+        "pass": 95,
+        "fail": 0,
+        "hold": 0,
+        "total": 95
+      },
+      "summary_before_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\e743fc735ed4eba779b2f6e8\\summary_before.csv",
+      "summary_after_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\e743fc735ed4eba779b2f6e8\\summary_after.csv",
+      "permit_paths": [
+        "incoming_sp_pdfs\\accounts\\aeoseo1111_gmail.com_51d07939\\20260630_023112_스카이코비원멀티주_허가서1.pdf",
+        "incoming_sp_pdfs\\accounts\\aeoseo1111_gmail.com_51d07939\\20260630_023112_스카이코비원멀티주_허가서2.pdf"
+      ]
+    }
+  }
+}

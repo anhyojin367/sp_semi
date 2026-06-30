@@ -1,0 +1,786 @@
+{
+  "sha256": {
+    "15936319924de39352fd56665753f83c3ed8bdd69ba5100dfe93784a971acb2f": {
+      "file": "20260620_182605_스카이코비원멀티주_더미데이터_제조번호_불일치12.pdf",
+      "original_name": "스카이코비원멀티주_더미데이터_제조번호_불일치12.pdf",
+      "attachment_type": "sp",
+      "size_bytes": 458519,
+      "sha256": "15936319924de39352fd56665753f83c3ed8bdd69ba5100dfe93784a971acb2f",
+      "subject": "[식약처] 야호",
+      "message_id": "<CAGznp5585xD__3TTrAo0njsEbgPtXBvXOZGNZL-Rw5AUbveQYw@mail.gmail.com>",
+      "message_id_header": "<CAGznp5585xD__3TTrAo0njsEbgPtXBvXOZGNZL-Rw5AUbveQYw@mail.gmail.com>",
+      "gmail_uid": "2282",
+      "raw_message_digest": "63fbf169951e4f903917b4f82ea4c0dc56da51c2ed10cf1017927f777bcb4a10",
+      "attachment_index": 1,
+      "received_at": "2026-06-20T18:26:05+09:00",
+      "subject_keyword": "[식약처]",
+      "account_address": "aeoseo1111@gmail.com",
+      "related_sp_files": [],
+      "related_permit_files": []
+    },
+    "57dd510e35623bc58e93d59e6dc52a2e3714cc1817379dd70fa1fa731849d275": {
+      "file": "20260630_023112_[중간보고회] 스카이코비원멀티주 더미데이터_ 제조일자, 제조수량, 로트번호 오류_시험결과_적합기재.pdf",
+      "original_name": "[중간보고회] 스카이코비원멀티주 더미데이터_ 제조일자, 제조수량, 로트번호 오류_시험결과_적합기재.pdf",
+      "attachment_type": "sp",
+      "size_bytes": 463763,
+      "sha256": "57dd510e35623bc58e93d59e6dc52a2e3714cc1817379dd70fa1fa731849d275",
+      "subject": "[식약처] 시연용더미데이터2",
+      "message_id": "<CA+kfR7xeo12bCad2LVpkLRfz5K5SsNDTnFOSuCfEms4ri0HRJQ@mail.gmail.com>",
+      "message_id_header": "<CA+kfR7xeo12bCad2LVpkLRfz5K5SsNDTnFOSuCfEms4ri0HRJQ@mail.gmail.com>",
+      "gmail_uid": "2311",
+      "raw_message_digest": "09555cb837f8c0c5d031cec084447df985d94bde64632d0a284414f6fe31d0de",
+      "attachment_index": 3,
+      "received_at": "2026-06-30T02:31:12+09:00",
+      "subject_keyword": "[식약처]",
+      "account_address": "aeoseo1111@gmail.com",
+      "related_sp_files": [],
+      "related_permit_files": [
+        "20260630_023112_스카이코비원멀티주_허가서1.pdf",
+        "20260630_023112_스카이코비원멀티주_허가서2.pdf"
+      ]
+    },
+    "b0391e6b55f53c3d97253c902848cf0f21f14955061682205b52303f77619e79": {
+      "file": "20260630_023112_스카이코비원멀티주_허가서1.pdf",
+      "original_name": "스카이코비원멀티주_허가서1.pdf",
+      "attachment_type": "permit",
+      "size_bytes": 253836,
+      "sha256": "b0391e6b55f53c3d97253c902848cf0f21f14955061682205b52303f77619e79",
+      "subject": "[식약처] 시연용더미데이터2",
+      "message_id": "<CA+kfR7xeo12bCad2LVpkLRfz5K5SsNDTnFOSuCfEms4ri0HRJQ@mail.gmail.com>",
+      "message_id_header": "<CA+kfR7xeo12bCad2LVpkLRfz5K5SsNDTnFOSuCfEms4ri0HRJQ@mail.gmail.com>",
+      "gmail_uid": "2311",
+      "raw_message_digest": "09555cb837f8c0c5d031cec084447df985d94bde64632d0a284414f6fe31d0de",
+      "attachment_index": 1,
+      "received_at": "2026-06-30T02:31:12+09:00",
+      "subject_keyword": "[식약처]",
+      "account_address": "aeoseo1111@gmail.com",
+      "related_sp_files": [
+        "20260630_023112_[중간보고회] 스카이코비원멀티주 더미데이터_ 제조일자, 제조수량, 로트번호 오류_시험결과_적합기재.pdf"
+      ],
+      "related_permit_files": [
+        "20260630_023112_스카이코비원멀티주_허가서2.pdf"
+      ]
+    },
+    "0419822296778332d2cdb4706aef84c85b2988cdc5e6b62ea3fe2909a9bedc8f": {
+      "file": "20260630_023112_스카이코비원멀티주_허가서2.pdf",
+      "original_name": "스카이코비원멀티주_허가서2.pdf",
+      "attachment_type": "permit",
+      "size_bytes": 974819,
+      "sha256": "0419822296778332d2cdb4706aef84c85b2988cdc5e6b62ea3fe2909a9bedc8f",
+      "subject": "[식약처] 시연용더미데이터2",
+      "message_id": "<CA+kfR7xeo12bCad2LVpkLRfz5K5SsNDTnFOSuCfEms4ri0HRJQ@mail.gmail.com>",
+      "message_id_header": "<CA+kfR7xeo12bCad2LVpkLRfz5K5SsNDTnFOSuCfEms4ri0HRJQ@mail.gmail.com>",
+      "gmail_uid": "2311",
+      "raw_message_digest": "09555cb837f8c0c5d031cec084447df985d94bde64632d0a284414f6fe31d0de",
+      "attachment_index": 2,
+      "received_at": "2026-06-30T02:31:12+09:00",
+      "subject_keyword": "[식약처]",
+      "account_address": "aeoseo1111@gmail.com",
+      "related_sp_files": [
+        "20260630_023112_[중간보고회] 스카이코비원멀티주 더미데이터_ 제조일자, 제조수량, 로트번호 오류_시험결과_적합기재.pdf"
+      ],
+      "related_permit_files": [
+        "20260630_023112_스카이코비원멀티주_허가서1.pdf"
+      ]
+    }
+  },
+  "files": {
+    "20260620_182605_스카이코비원멀티주_더미데이터_제조번호_불일치12.pdf": {
+      "file": "20260620_182605_스카이코비원멀티주_더미데이터_제조번호_불일치12.pdf",
+      "original_name": "스카이코비원멀티주_더미데이터_제조번호_불일치12.pdf",
+      "attachment_type": "sp",
+      "size_bytes": 458519,
+      "sha256": "15936319924de39352fd56665753f83c3ed8bdd69ba5100dfe93784a971acb2f",
+      "subject": "[식약처] 야호",
+      "message_id": "<CAGznp5585xD__3TTrAo0njsEbgPtXBvXOZGNZL-Rw5AUbveQYw@mail.gmail.com>",
+      "message_id_header": "<CAGznp5585xD__3TTrAo0njsEbgPtXBvXOZGNZL-Rw5AUbveQYw@mail.gmail.com>",
+      "gmail_uid": "2282",
+      "raw_message_digest": "63fbf169951e4f903917b4f82ea4c0dc56da51c2ed10cf1017927f777bcb4a10",
+      "attachment_index": 1,
+      "received_at": "2026-06-20T18:26:05+09:00",
+      "subject_keyword": "[식약처]",
+      "account_address": "aeoseo1111@gmail.com",
+      "related_sp_files": [],
+      "related_permit_files": []
+    },
+    "20260630_021532_[중간보고회] 스카이코비원멀티주 더미데이터_ 제조일자, 제조수량, 로트번호 오류_시험결과_적합기재.pdf": {
+      "file": "20260630_021532_[중간보고회] 스카이코비원멀티주 더미데이터_ 제조일자, 제조수량, 로트번호 오류_시험결과_적합기재.pdf",
+      "original_name": "[중간보고회] 스카이코비원멀티주 더미데이터_ 제조일자, 제조수량, 로트번호 오류_시험결과_적합기재.pdf",
+      "attachment_type": "sp",
+      "size_bytes": 463763,
+      "sha256": "57dd510e35623bc58e93d59e6dc52a2e3714cc1817379dd70fa1fa731849d275",
+      "subject": "[식약처] 검증용더미데이터1",
+      "message_id": "<CA+kfR7zLcTxq_SqXTWs__WZ4hUc-XNkoX-J-MJ6g6W6=kmNYsQ@mail.gmail.com>",
+      "message_id_header": "<CA+kfR7zLcTxq_SqXTWs__WZ4hUc-XNkoX-J-MJ6g6W6=kmNYsQ@mail.gmail.com>",
+      "gmail_uid": "2310",
+      "raw_message_digest": "922fbb3215906dd4fc4f464161b7234268b2cf10ee50263f6946e3d402236dc4",
+      "attachment_index": 1,
+      "received_at": "2026-06-30T02:15:32+09:00",
+      "subject_keyword": "[식약처]",
+      "account_address": "aeoseo1111@gmail.com",
+      "related_sp_files": [],
+      "related_permit_files": [
+        "20260630_021532_스카이코비원멀티주_허가서1.pdf",
+        "20260630_021532_스카이코비원멀티주_허가서2.pdf"
+      ]
+    },
+    "20260630_021532_스카이코비원멀티주_허가서1.pdf": {
+      "file": "20260630_021532_스카이코비원멀티주_허가서1.pdf",
+      "original_name": "스카이코비원멀티주_허가서1.pdf",
+      "attachment_type": "permit",
+      "size_bytes": 253836,
+      "sha256": "b0391e6b55f53c3d97253c902848cf0f21f14955061682205b52303f77619e79",
+      "subject": "[식약처] 검증용더미데이터1",
+      "message_id": "<CA+kfR7zLcTxq_SqXTWs__WZ4hUc-XNkoX-J-MJ6g6W6=kmNYsQ@mail.gmail.com>",
+      "message_id_header": "<CA+kfR7zLcTxq_SqXTWs__WZ4hUc-XNkoX-J-MJ6g6W6=kmNYsQ@mail.gmail.com>",
+      "gmail_uid": "2310",
+      "raw_message_digest": "922fbb3215906dd4fc4f464161b7234268b2cf10ee50263f6946e3d402236dc4",
+      "attachment_index": 2,
+      "received_at": "2026-06-30T02:15:32+09:00",
+      "subject_keyword": "[식약처]",
+      "account_address": "aeoseo1111@gmail.com",
+      "related_sp_files": [
+        "20260630_021532_[중간보고회] 스카이코비원멀티주 더미데이터_ 제조일자, 제조수량, 로트번호 오류_시험결과_적합기재.pdf"
+      ],
+      "related_permit_files": [
+        "20260630_021532_스카이코비원멀티주_허가서2.pdf"
+      ]
+    },
+    "20260630_021532_스카이코비원멀티주_허가서2.pdf": {
+      "file": "20260630_021532_스카이코비원멀티주_허가서2.pdf",
+      "original_name": "스카이코비원멀티주_허가서2.pdf",
+      "attachment_type": "permit",
+      "size_bytes": 974819,
+      "sha256": "0419822296778332d2cdb4706aef84c85b2988cdc5e6b62ea3fe2909a9bedc8f",
+      "subject": "[식약처] 검증용더미데이터1",
+      "message_id": "<CA+kfR7zLcTxq_SqXTWs__WZ4hUc-XNkoX-J-MJ6g6W6=kmNYsQ@mail.gmail.com>",
+      "message_id_header": "<CA+kfR7zLcTxq_SqXTWs__WZ4hUc-XNkoX-J-MJ6g6W6=kmNYsQ@mail.gmail.com>",
+      "gmail_uid": "2310",
+      "raw_message_digest": "922fbb3215906dd4fc4f464161b7234268b2cf10ee50263f6946e3d402236dc4",
+      "attachment_index": 3,
+      "received_at": "2026-06-30T02:15:32+09:00",
+      "subject_keyword": "[식약처]",
+      "account_address": "aeoseo1111@gmail.com",
+      "related_sp_files": [
+        "20260630_021532_[중간보고회] 스카이코비원멀티주 더미데이터_ 제조일자, 제조수량, 로트번호 오류_시험결과_적합기재.pdf"
+      ],
+      "related_permit_files": [
+        "20260630_021532_스카이코비원멀티주_허가서1.pdf"
+      ]
+    },
+    "20260630_023112_스카이코비원멀티주_허가서1.pdf": {
+      "file": "20260630_023112_스카이코비원멀티주_허가서1.pdf",
+      "original_name": "스카이코비원멀티주_허가서1.pdf",
+      "attachment_type": "permit",
+      "size_bytes": 253836,
+      "sha256": "b0391e6b55f53c3d97253c902848cf0f21f14955061682205b52303f77619e79",
+      "subject": "[식약처] 시연용더미데이터2",
+      "message_id": "<CA+kfR7xeo12bCad2LVpkLRfz5K5SsNDTnFOSuCfEms4ri0HRJQ@mail.gmail.com>",
+      "message_id_header": "<CA+kfR7xeo12bCad2LVpkLRfz5K5SsNDTnFOSuCfEms4ri0HRJQ@mail.gmail.com>",
+      "gmail_uid": "2311",
+      "raw_message_digest": "09555cb837f8c0c5d031cec084447df985d94bde64632d0a284414f6fe31d0de",
+      "attachment_index": 1,
+      "received_at": "2026-06-30T02:31:12+09:00",
+      "subject_keyword": "[식약처]",
+      "account_address": "aeoseo1111@gmail.com",
+      "related_sp_files": [
+        "20260630_023112_[중간보고회] 스카이코비원멀티주 더미데이터_ 제조일자, 제조수량, 로트번호 오류_시험결과_적합기재.pdf"
+      ],
+      "related_permit_files": [
+        "20260630_023112_스카이코비원멀티주_허가서2.pdf"
+      ]
+    },
+    "20260630_023112_스카이코비원멀티주_허가서2.pdf": {
+      "file": "20260630_023112_스카이코비원멀티주_허가서2.pdf",
+      "original_name": "스카이코비원멀티주_허가서2.pdf",
+      "attachment_type": "permit",
+      "size_bytes": 974819,
+      "sha256": "0419822296778332d2cdb4706aef84c85b2988cdc5e6b62ea3fe2909a9bedc8f",
+      "subject": "[식약처] 시연용더미데이터2",
+      "message_id": "<CA+kfR7xeo12bCad2LVpkLRfz5K5SsNDTnFOSuCfEms4ri0HRJQ@mail.gmail.com>",
+      "message_id_header": "<CA+kfR7xeo12bCad2LVpkLRfz5K5SsNDTnFOSuCfEms4ri0HRJQ@mail.gmail.com>",
+      "gmail_uid": "2311",
+      "raw_message_digest": "09555cb837f8c0c5d031cec084447df985d94bde64632d0a284414f6fe31d0de",
+      "attachment_index": 2,
+      "received_at": "2026-06-30T02:31:12+09:00",
+      "subject_keyword": "[식약처]",
+      "account_address": "aeoseo1111@gmail.com",
+      "related_sp_files": [
+        "20260630_023112_[중간보고회] 스카이코비원멀티주 더미데이터_ 제조일자, 제조수량, 로트번호 오류_시험결과_적합기재.pdf"
+      ],
+      "related_permit_files": [
+        "20260630_023112_스카이코비원멀티주_허가서1.pdf"
+      ]
+    },
+    "20260630_023112_[중간보고회] 스카이코비원멀티주 더미데이터_ 제조일자, 제조수량, 로트번호 오류_시험결과_적합기재.pdf": {
+      "file": "20260630_023112_[중간보고회] 스카이코비원멀티주 더미데이터_ 제조일자, 제조수량, 로트번호 오류_시험결과_적합기재.pdf",
+      "original_name": "[중간보고회] 스카이코비원멀티주 더미데이터_ 제조일자, 제조수량, 로트번호 오류_시험결과_적합기재.pdf",
+      "attachment_type": "sp",
+      "size_bytes": 463763,
+      "sha256": "57dd510e35623bc58e93d59e6dc52a2e3714cc1817379dd70fa1fa731849d275",
+      "subject": "[식약처] 시연용더미데이터2",
+      "message_id": "<CA+kfR7xeo12bCad2LVpkLRfz5K5SsNDTnFOSuCfEms4ri0HRJQ@mail.gmail.com>",
+      "message_id_header": "<CA+kfR7xeo12bCad2LVpkLRfz5K5SsNDTnFOSuCfEms4ri0HRJQ@mail.gmail.com>",
+      "gmail_uid": "2311",
+      "raw_message_digest": "09555cb837f8c0c5d031cec084447df985d94bde64632d0a284414f6fe31d0de",
+      "attachment_index": 3,
+      "received_at": "2026-06-30T02:31:12+09:00",
+      "subject_keyword": "[식약처]",
+      "account_address": "aeoseo1111@gmail.com",
+      "related_sp_files": [],
+      "related_permit_files": [
+        "20260630_023112_스카이코비원멀티주_허가서1.pdf",
+        "20260630_023112_스카이코비원멀티주_허가서2.pdf"
+      ]
+    }
+  },
+  "uid_attachments": {
+    "e3c4a22578c5ce8adb3058c30ac9153fb88a3a2e": {
+      "file": "20260620_182605_스카이코비원멀티주_더미데이터_제조번호_불일치12.pdf",
+      "gmail_uid": "2282",
+      "attachment_index": 1,
+      "original_name": "스카이코비원멀티주_더미데이터_제조번호_불일치12.pdf",
+      "sha256": "15936319924de39352fd56665753f83c3ed8bdd69ba5100dfe93784a971acb2f"
+    },
+    "e186560ce2c82cd199be6ada5976a8dc5f6800c7": {
+      "file": "20260630_021532_[중간보고회] 스카이코비원멀티주 더미데이터_ 제조일자, 제조수량, 로트번호 오류_시험결과_적합기재.pdf",
+      "gmail_uid": "2310",
+      "attachment_index": 1,
+      "original_name": "[중간보고회] 스카이코비원멀티주 더미데이터_ 제조일자, 제조수량, 로트번호 오류_시험결과_적합기재.pdf",
+      "sha256": "57dd510e35623bc58e93d59e6dc52a2e3714cc1817379dd70fa1fa731849d275"
+    },
+    "4a01fa756be7187e83e6ab72525282dcdd6b2c31": {
+      "file": "20260630_021532_스카이코비원멀티주_허가서1.pdf",
+      "gmail_uid": "2310",
+      "attachment_index": 2,
+      "original_name": "스카이코비원멀티주_허가서1.pdf",
+      "sha256": "b0391e6b55f53c3d97253c902848cf0f21f14955061682205b52303f77619e79"
+    },
+    "c17f531cc07256b2ce18cf05abdb3478f71173eb": {
+      "file": "20260630_021532_스카이코비원멀티주_허가서2.pdf",
+      "gmail_uid": "2310",
+      "attachment_index": 3,
+      "original_name": "스카이코비원멀티주_허가서2.pdf",
+      "sha256": "0419822296778332d2cdb4706aef84c85b2988cdc5e6b62ea3fe2909a9bedc8f"
+    },
+    "61af9784042accdc9021bf607193f7ab199eab23": {
+      "file": "20260630_023112_스카이코비원멀티주_허가서1.pdf",
+      "gmail_uid": "2311",
+      "attachment_index": 1,
+      "original_name": "스카이코비원멀티주_허가서1.pdf",
+      "sha256": "b0391e6b55f53c3d97253c902848cf0f21f14955061682205b52303f77619e79"
+    },
+    "24023282c8eba39fd4acfb3516c69d0b4a23def6": {
+      "file": "20260630_023112_스카이코비원멀티주_허가서2.pdf",
+      "gmail_uid": "2311",
+      "attachment_index": 2,
+      "original_name": "스카이코비원멀티주_허가서2.pdf",
+      "sha256": "0419822296778332d2cdb4706aef84c85b2988cdc5e6b62ea3fe2909a9bedc8f"
+    },
+    "63130f25d085516536f19eb11e396c6f32e952c5": {
+      "file": "20260630_023112_[중간보고회] 스카이코비원멀티주 더미데이터_ 제조일자, 제조수량, 로트번호 오류_시험결과_적합기재.pdf",
+      "gmail_uid": "2311",
+      "attachment_index": 3,
+      "original_name": "[중간보고회] 스카이코비원멀티주 더미데이터_ 제조일자, 제조수량, 로트번호 오류_시험결과_적합기재.pdf",
+      "sha256": "57dd510e35623bc58e93d59e6dc52a2e3714cc1817379dd70fa1fa731849d275"
+    }
+  },
+  "checked_uids": {
+    "0c4bc3f4f6cd569c0e2a29320831a7b779422461": {
+      "gmail_uid": "2280",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[ 식약처]",
+      "checked_at": "2026-06-20T14:22:02.073563"
+    },
+    "81380c89fff87143a51f4178d556fb43594e5ec0": {
+      "gmail_uid": "2279",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[ 식약처]",
+      "checked_at": "2026-06-20T14:22:02.302079"
+    },
+    "179b2124e790f04d52d5f6ea7aa9156ed3b68c69": {
+      "gmail_uid": "2278",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[ 식약처]",
+      "checked_at": "2026-06-20T14:22:02.523389"
+    },
+    "90f74e66857ffb203d0842d2b230e5dea72bae94": {
+      "gmail_uid": "2277",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[ 식약처]",
+      "checked_at": "2026-06-20T14:22:02.751780"
+    },
+    "511771704512a41f2c3bb26305998b6863144a83": {
+      "gmail_uid": "2276",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[ 식약처]",
+      "checked_at": "2026-06-20T14:22:02.990858"
+    },
+    "cc8b9a8a89ebec8d498bcc5e345a7eb02d996676": {
+      "gmail_uid": "2275",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[ 식약처]",
+      "checked_at": "2026-06-20T14:22:03.212824"
+    },
+    "32c2e989120cd649118536219dc26193f8c30ff5": {
+      "gmail_uid": "2274",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[ 식약처]",
+      "checked_at": "2026-06-20T14:22:03.435919"
+    },
+    "346a0cf2c9d1735ac303e7321a87e3a4bf4fd4ec": {
+      "gmail_uid": "2273",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[ 식약처]",
+      "checked_at": "2026-06-20T14:22:03.650337"
+    },
+    "02a201ed4a0a7e4fe3233992ebe6bb43944c573c": {
+      "gmail_uid": "2272",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[ 식약처]",
+      "checked_at": "2026-06-20T14:22:03.885703"
+    },
+    "23a7d9f1808fe569f6780e906ad2612dc9cb15f2": {
+      "gmail_uid": "2271",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[ 식약처]",
+      "checked_at": "2026-06-20T14:22:04.106861"
+    },
+    "a6ac66098355401a326f95b2b484eafdc864c269": {
+      "gmail_uid": "2270",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[ 식약처]",
+      "checked_at": "2026-06-20T14:22:04.327069"
+    },
+    "ec09fe0a005ed0afe2c1a7e0fddc348be697c444": {
+      "gmail_uid": "2269",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[ 식약처]",
+      "checked_at": "2026-06-20T14:22:04.544223"
+    },
+    "e08049e7d443d16bdbd121f9584805125d111b22": {
+      "gmail_uid": "2268",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[ 식약처]",
+      "checked_at": "2026-06-20T14:22:04.761500"
+    },
+    "35c0d10cffbd1d59b05465f45ec96cd685c49622": {
+      "gmail_uid": "2267",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[ 식약처]",
+      "checked_at": "2026-06-20T14:22:04.976708"
+    },
+    "8cac25a1587ccef2b2c091b894b3a89b46229712": {
+      "gmail_uid": "2266",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[ 식약처]",
+      "checked_at": "2026-06-20T14:22:05.191159"
+    },
+    "319529234c5a9cb777e055a911ee72c5d02f25c4": {
+      "gmail_uid": "2265",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[ 식약처]",
+      "checked_at": "2026-06-20T14:22:05.408331"
+    },
+    "f3b324c70f6f763e7068bb120ae58b12092438a5": {
+      "gmail_uid": "2264",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[ 식약처]",
+      "checked_at": "2026-06-20T14:22:05.630482"
+    },
+    "a970f79674f7e4a46ed557dea28e3f6cf3a30364": {
+      "gmail_uid": "2263",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[ 식약처]",
+      "checked_at": "2026-06-20T14:22:05.851731"
+    },
+    "1363f1bd36837ebbf46c2b225aba5babddbf81bd": {
+      "gmail_uid": "2262",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[ 식약처]",
+      "checked_at": "2026-06-20T14:22:06.069922"
+    },
+    "3c5aac1144cacbc6a31f261afd7fbf576a33945b": {
+      "gmail_uid": "2261",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[ 식약처]",
+      "checked_at": "2026-06-20T14:22:06.290997"
+    },
+    "36b2d5dfd6da73586315490dfe2c23011b97244a": {
+      "gmail_uid": "2281",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-20T18:21:40.128386"
+    },
+    "3e71699187623b7974cf4c47021c7bbff1f8f6ea": {
+      "gmail_uid": "2280",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-20T18:21:40.487677"
+    },
+    "8ad63ad5a5f702ff73f58653db26946696311ed0": {
+      "gmail_uid": "2279",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-20T18:21:40.769727"
+    },
+    "245382487e1237f2cd18be659576b678b3c19131": {
+      "gmail_uid": "2278",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-20T18:21:41.074793"
+    },
+    "e6cc8f34165d16db59d3ae8f1545f09b82911dff": {
+      "gmail_uid": "2277",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-20T18:21:41.362243"
+    },
+    "97315d6753f22812b0d2a51816777bb0ac9ceca8": {
+      "gmail_uid": "2276",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-20T18:21:41.632014"
+    },
+    "4b0492db92f17162e6eddd3c8ad7ef87fabd956c": {
+      "gmail_uid": "2275",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-20T18:21:41.870179"
+    },
+    "3bd879efd3b3de91a66d56fe06b1bcbba9c3eef3": {
+      "gmail_uid": "2274",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-20T18:21:42.193299"
+    },
+    "941c5fe6ea452f22274f494bfc391f7ea81bdac1": {
+      "gmail_uid": "2273",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-20T18:21:42.658482"
+    },
+    "cf54421012918b9b807c0c783071c709f5314789": {
+      "gmail_uid": "2272",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-20T18:21:42.926290"
+    },
+    "dec964caccb2089520eef11801fdd0124d9a0b1b": {
+      "gmail_uid": "2271",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-20T18:21:43.196029"
+    },
+    "d8ac1aa300f3c0b3a634fb6d273d14f175fa1f66": {
+      "gmail_uid": "2270",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-20T18:21:43.437703"
+    },
+    "a4b78b21ea0a8552c4c7b27d6da7ad47fc8ed5ec": {
+      "gmail_uid": "2269",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-20T18:21:43.694849"
+    },
+    "cb23efae4a678d7bd18902fa6e52d9e25dba70f2": {
+      "gmail_uid": "2268",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-20T18:21:44.016639"
+    },
+    "3b379667e733155710a0c4f5bf1311e3465d870c": {
+      "gmail_uid": "2267",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-20T18:21:44.248325"
+    },
+    "14e515e32adf6b58abc91a381be1d0acb7e75636": {
+      "gmail_uid": "2266",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-20T18:21:44.540244"
+    },
+    "140bdff6ae145b3de4e62086e924098823f05a46": {
+      "gmail_uid": "2265",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-20T18:21:44.836030"
+    },
+    "976413b651dd623c73a8bfb670f45dd4508d5dac": {
+      "gmail_uid": "2264",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-20T18:21:45.120864"
+    },
+    "b1b3ea9e89326f7dc0532cb70cfa040888f244e7": {
+      "gmail_uid": "2263",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-20T18:21:45.476650"
+    },
+    "712d42fea09d03ee94ed009bd21f67da614a43e3": {
+      "gmail_uid": "2262",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-20T18:21:45.701469"
+    },
+    "9e0095de5c3d23a8446dcf5b5c08994aac316eca": {
+      "gmail_uid": "2282",
+      "status": "checked",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-20T18:27:22.722288"
+    },
+    "df27697382e626468fbaa9fdd900db2919a1593b": {
+      "gmail_uid": "2310",
+      "status": "checked",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-30T02:16:06.683882"
+    },
+    "8c7b55054ae3f475efd216c1561eb2966e3cb920": {
+      "gmail_uid": "2309",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-30T02:16:06.923427"
+    },
+    "4f118bfec36d4bf285480288b276b54d6927b2a9": {
+      "gmail_uid": "2308",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-30T02:16:07.281851"
+    },
+    "4963ff00d202a7344d72f7390ebf1695a44ec3a3": {
+      "gmail_uid": "2307",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-30T02:16:07.617176"
+    },
+    "e2f97c6835f4acb04087bc8da077ccbbed328bdc": {
+      "gmail_uid": "2306",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-30T02:16:07.918084"
+    },
+    "d840bf1a10a4590dbf138957b7074a06a588ff96": {
+      "gmail_uid": "2305",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-30T02:16:08.125768"
+    },
+    "0105f36dcfc5c41fb85c8b81a248d1dfe83a7a96": {
+      "gmail_uid": "2304",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-30T02:16:08.337316"
+    },
+    "9922d2c2e37b69d851b24bce55705ba06e3e7b4c": {
+      "gmail_uid": "2303",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-30T02:16:08.580752"
+    },
+    "fcce80f60b0be4e84db85197d035dbfbf3d37b4a": {
+      "gmail_uid": "2302",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-30T02:16:08.792334"
+    },
+    "c14b08370848012b64ef93aadb2891a47c58a35d": {
+      "gmail_uid": "2301",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-30T02:16:09.001405"
+    },
+    "f958f9fe377ab40b7a7a35e7cc5db2707af27971": {
+      "gmail_uid": "2300",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-30T02:16:09.209415"
+    },
+    "ccc30f62908710ddd119b1f2a94b0e21e79ae76c": {
+      "gmail_uid": "2299",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-30T02:16:09.521107"
+    },
+    "c85bfda73ce3f8c121be970ef5ad09f2bc4100d7": {
+      "gmail_uid": "2298",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-30T02:16:09.793812"
+    },
+    "a79fd7515f4a632267e0807004f20144529ea4fb": {
+      "gmail_uid": "2297",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-30T02:16:10.024524"
+    },
+    "c9b8619477875f5d14125a02457e5f1fada2cfa9": {
+      "gmail_uid": "2296",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-30T02:16:10.293622"
+    },
+    "f56306f398488a1d870eced3facb8c887ad5d1bd": {
+      "gmail_uid": "2295",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-30T02:16:10.514323"
+    },
+    "abd624529da29fbb3cd1c8a4ff2394db5a8132be": {
+      "gmail_uid": "2294",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-30T02:16:10.793926"
+    },
+    "874bc6e0640b219968e150ff5c798aca159390b4": {
+      "gmail_uid": "2293",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-30T02:16:11.005080"
+    },
+    "41d0f287a202bf0367757819b7feb568b8c4a4b1": {
+      "gmail_uid": "2292",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-30T02:16:11.212866"
+    },
+    "41f1567509b98830e3148e576be4d5e17eb0f422": {
+      "gmail_uid": "2291",
+      "status": "subject_skipped",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-30T02:16:11.442918"
+    },
+    "d58422ac6880fa9b71d3e96665bf49fdd0f8dae0": {
+      "gmail_uid": "2311",
+      "status": "checked",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-06-30T02:32:13.544803"
+    }
+  }
+}
