@@ -75,18 +75,30 @@ _TEMPLATE = r"""<!DOCTYPE html>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-html,body{height:100%}
-body{font-family:'Malgun Gothic','Apple SD Gothic Neo','Noto Sans KR',sans-serif;background:#eef5ff;color:#102033;overflow:hidden}
-#root{display:flex;flex-direction:column;height:100vh;gap:10px;padding:8px}
-#stage{flex:1;position:relative;border-radius:18px;overflow:hidden;min-height:0;
+html,body{min-height:100%;height:auto}
+body{font-family:'Malgun Gothic','Apple SD Gothic Neo','Noto Sans KR',sans-serif;background:#eef5ff;color:#102033;overflow:auto}
+#root{display:flex;flex-direction:column;min-height:1100px;height:auto;gap:10px;padding:8px}
+#stage{flex:1;position:relative;border-radius:18px;overflow:hidden;min-height:1010px;
   border:1px solid rgba(148,163,184,.55);background:#f8fbff;
   box-shadow:0 18px 44px rgba(15,23,42,.12),inset 0 1px 0 rgba(255,255,255,.82)}
 #main-svg{display:block;width:100%;height:100%}
-#status-bar{flex:0 0 auto;height:60px;display:flex;align-items:center;justify-content:center;
-  gap:14px;padding:0 14px;
+#status-bar{flex:0 0 auto;height:64px;display:flex;align-items:center;justify-content:center;
+  gap:18px;padding:0 16px;
   background:linear-gradient(180deg,#ffffff,#eaf3ff);
   border:1px solid rgba(148,163,184,.62);border-radius:12px}
 #status-text{font-size:20px;color:#102033;font-weight:900;letter-spacing:.2px}
+#summary-panel{display:none!important;align-items:center;gap:16px;padding:8px 14px;border-radius:12px;
+  background:#ffffff;border:1px solid rgba(191,215,240,.95);box-shadow:0 6px 18px rgba(15,23,42,.08)}
+#summary-panel.on{display:flex}
+.summary-title{font-size:13px;font-weight:950;color:#64748b;letter-spacing:.08em;margin-right:2px}
+.summary-metric{display:inline-flex;align-items:center;gap:5px;font-size:20px;font-weight:950}
+.summary-metric.pass{color:#059669;margin-right:13px}
+.summary-metric.hold{color:#f59e0b;margin-right:13px}
+.summary-metric.fail{color:#e11d48}
+.summary-dot{width:16px;height:16px;border-radius:50%;display:inline-block}
+.summary-metric.pass .summary-dot{background:#059669}
+.summary-metric.hold .summary-dot{background:#f59e0b}
+.summary-metric.fail .summary-dot{background:#e11d48}
 #inline-final-link{display:none;align-items:center;justify-content:center;min-height:40px;padding:0 18px;
   border-radius:12px;background:#059669;color:#fff;text-decoration:none;font-weight:950;
   box-shadow:0 8px 18px rgba(5,150,105,.22)}
@@ -141,6 +153,12 @@ body{font-family:'Malgun Gothic','Apple SD Gothic Neo','Noto Sans KR',sans-serif
     </svg>
   </div>
   <div id="status-bar">
+    <div id="summary-panel" aria-label="summary">
+      <span class="summary-title">SUMMARY</span>
+      <span class="summary-metric pass"><i class="summary-dot"></i><b id="sum-pass">0</b></span>
+      <span class="summary-metric hold"><i class="summary-dot"></i><b id="sum-hold">0</b></span>
+      <span class="summary-metric fail"><i class="summary-dot"></i><b id="sum-fail">0</b></span>
+    </div>
     <span id="status-text">AI 검수 시뮬레이션을 시작합니다.</span>
   </div>
 </div>
@@ -161,12 +179,12 @@ const C_LINE='#94a3b8',C_NODE_STROKE='#2563eb',C_TEXT='#102033',C_MUTED='#475569
 
 // ════════ 캔버스 / 영역 ════════
 // viewBox 의 가로세로 비율을 실제 컨테이너 비율에 맞춰, 좌우 여백 없이 박스를 꽉 채운다.
-const VH=820, SPLIT=0.55;
+const VH=820, SPLIT=0.63;
 const stageEl=document.getElementById('stage');
 let _cw=stageEl.clientWidth||(window.innerWidth-16);
 let _ch=stageEl.clientHeight||(window.innerHeight-64);
 let VW=Math.round(VH*(_cw/Math.max(1,_ch)));
-VW=Math.max(1180,Math.min(VW,2300));     // 극단적 비율 방어
+VW=Math.max(1650,Math.min(VW,2600));     // 하단 검증/판정 그룹을 넓게 펼쳐 보이도록 방어
 const A_Y0=48, A_Y1=VH*SPLIT-14;
 const B_Y0=VH*SPLIT+16, B_Y1=VH-18;
 const svg=document.getElementById('main-svg');
@@ -204,10 +222,14 @@ DATA.nodes.forEach(n=>{nodesById[n.id]=n});
 const layers=DATA.layers.filter(l=>l.length);
 const cols=layers.length;
 const maxLanes=Math.max(1,...layers.map(l=>l.length));
-const AX0=118,AX1=VW-118;
-const BW=Math.max(170,Math.min(282,cols>1?((AX1-AX0)/(cols-1)-28):282)),BH=82;
+const GRAPH_PAD=96;
+const denseGraph=maxLanes>=4;
+const maxBoxForCols=cols>1?((VW-GRAPH_PAD*2)/cols-22):282;
+const BW=Math.max(denseGraph?176:104,Math.min(denseGraph?276:282,maxBoxForCols)),BH=denseGraph?48:82;
+const AX0=GRAPH_PAD+BW/2,AX1=VW-GRAPH_PAD-BW/2;
 const colX=i=>cols>1?AX0+i*(AX1-AX0)/(cols-1):(AX0+AX1)/2;
-const laneSpan=Math.min(178,(A_Y1-A_Y0-112)/maxLanes);
+const laneGap=denseGraph?Math.max(BH+25,(A_Y1-A_Y0-92)/Math.max(1,maxLanes-1)):Math.min(178,(A_Y1-A_Y0-112)/maxLanes);
+const laneSpan=denseGraph?Math.min(66,laneGap):laneGap;
 const aMid=(A_Y0+A_Y1)/2-4;
 layers.forEach((layer,li)=>{
   const k=layer.length;
@@ -219,6 +241,17 @@ layers.forEach((layer,li)=>{
     nd._x1=nd._cx+BW/2; nd._y1=nd._cy+BH/2;
   });
 });
+if(denseGraph){
+  const botTopSafety=123; // dense graphs keep bots closer to nodes so the graph stays above the process lane.
+  const minNodeTop=Math.min(...DATA.nodes.filter(n=>n._y0!==undefined).map(n=>n._y0));
+  const shiftY=Math.max(0,Math.min(74,botTopSafety-minNodeTop));
+  if(shiftY>0){
+    DATA.nodes.forEach(n=>{
+      if(n._y0===undefined)return;
+      n._cy+=shiftY; n._y0+=shiftY; n._y1+=shiftY;
+    });
+  }
+}
 const topo=[];
 layers.forEach(l=>l.forEach(nid=>{if(nodesById[nid]&&nodesById[nid]._cx!==undefined)topo.push(nid)}));
 if(!topo.length){
@@ -258,11 +291,11 @@ topo.forEach(nid=>{
   g.appendChild(svgEl('circle',{cx:n._x0,cy:n._cy,r:5,fill:'#ffffff',stroke:C_LINE,'stroke-width':1.8}));
   g.appendChild(svgEl('circle',{cx:n._x1,cy:n._cy,r:5,fill:'#ffffff',stroke:C_LINE,'stroke-width':1.8}));
   const label=n.label;
-  const tx=svgEl('text',{x:n._cx,y:n._cy,fill:C_TEXT,'font-size':'22px','font-weight':'900',
+  const tx=svgEl('text',{x:n._cx,y:n._cy,fill:C_TEXT,'font-size':denseGraph?'19px':'22px','font-weight':'900',
     'text-anchor':'middle','dominant-baseline':'central'}); tx.textContent=label;
   g.appendChild(tx);
   boxL.appendChild(g);
-  fitSvgText(tx,BW-30,18);
+  fitSvgText(tx,BW-(denseGraph?18:24),denseGraph?13:14);
   boxes[nid]={g,rect};
 });
 
@@ -270,19 +303,23 @@ topo.forEach(nid=>{
 const indEls={};
 topo.forEach(nid=>{
   const n=nodesById[nid];
-  const compactInd=BW<220;
-  const g=svgEl('g',{transform:`translate(${n._cx},${n._y1+20})`}); g.style.opacity=0;
-  const cells=[
-    {key:'pass',color:C_P,target:n.pass_count,dotX:compactInd?-80:-110,numX:compactInd?-56:-78},
-    {key:'hold',color:C_H,target:n.hold_count,dotX:compactInd?-38:-54,numX:compactInd?-14:-22},
-    {key:'fail',color:C_F,target:n.fail_count,dotX:compactInd?4:2,numX:compactInd?28:34},
-    {key:'total',color:C_W,target:n.total_count,dotX:compactInd?46:62,numX:compactInd?70:94,label:compactInd?'':'전체',labelX:compactInd?0:118},
+  const compactInd=BW<220||denseGraph;
+  const g=svgEl('g',{transform:`translate(${n._cx},${n._y1+(denseGraph?8:20)})`}); g.style.opacity=0;
+  const denseGap=Math.min(64,BW*.24);
+  const cells=denseGraph?[
+    {key:'pass',color:C_P,target:n.pass_count,dotX:-denseGap-18,numX:-denseGap+4},
+    {key:'hold',color:C_H,target:n.hold_count,dotX:-18,numX:4},
+    {key:'fail',color:C_F,target:n.fail_count,dotX:denseGap-18,numX:denseGap+4},
+  ]:[
+    {key:'pass',color:C_P,target:n.pass_count,dotX:compactInd?-BW*.31:-78,numX:compactInd?-BW*.21:-56},
+    {key:'hold',color:C_H,target:n.hold_count,dotX:compactInd?-BW*.02:-8,numX:compactInd?BW*.08:14},
+    {key:'fail',color:C_F,target:n.fail_count,dotX:compactInd?BW*.27:64,numX:compactInd?BW*.37:86},
   ];
   const els={};
   cells.forEach(c=>{
-    g.appendChild(svgEl('circle',{cx:c.dotX,cy:0,r:compactInd?6.2:7.2,fill:'#ffffff',stroke:c.color,'stroke-width':2.2}));
+    g.appendChild(svgEl('circle',{cx:c.dotX,cy:0,r:denseGraph?5.6:(compactInd?6.2:7.2),fill:'#ffffff',stroke:c.color,'stroke-width':2.2}));
     const dot=g.lastChild;
-    const num=svgEl('text',{x:c.numX,y:0,fill:'#475569','font-size':compactInd?'17px':'20px','font-weight':'950','text-anchor':'middle','dominant-baseline':'central'});
+    const num=svgEl('text',{x:c.numX,y:0,fill:'#475569','font-size':denseGraph?'15px':(compactInd?'17px':'20px'),'font-weight':'950','text-anchor':'middle','dominant-baseline':'central'});
     num.textContent='0'; g.appendChild(num);
     if(c.label){
       const label=svgEl('text',{x:c.labelX,y:0,fill:'#64748b','font-size':'12px','font-weight':'850','dominant-baseline':'central'});
@@ -297,8 +334,9 @@ function showInd(nid){gsap.to(indEls[nid].g,{opacity:1,duration:.25})}
 function countUp(nid){  // 표시 대상 값으로 카운트업 (허가서가 있으면 after, 없으면 before)
   const n=nodesById[nid];
   const targets=PERMIT_ENABLED?afterCounts(n):null;
+  updateSummary(nid, targets || null);
   const info=indEls[nid];
-  ['pass','hold','fail','total'].forEach(k=>{
+  ['pass','hold','fail'].forEach(k=>{
     const s=info.els[k];
     if(targets)s.target=targets[k];
     gsap.to(s.dot,{attr:{fill:s.color},duration:.3});
@@ -307,6 +345,7 @@ function countUp(nid){  // 표시 대상 값으로 카운트업 (허가서가 �
     gsap.to(p,{v:s.target,duration:.7,ease:'power1.out',onUpdate:()=>{s.num.textContent=Math.round(p.v)}});
   });
 }
+function updateSummary(nid, counts){return;}
 function afterCounts(n){
   const value=(afterKey,beforeKey)=>{
     const after=Number(n[afterKey]);
@@ -334,7 +373,7 @@ function recountAfter(nid){  // 허가서 검토 후 after 값으로 재집계 (
       detail:{nodeId:nid,label:n.label,counts:tgt}
     }));
   }catch(e){}
-  ['pass','hold','fail','total'].forEach(k=>{
+  ['pass','hold','fail'].forEach(k=>{
     const s=info.els[k];
     s.target=tgt[k];
     const cur=parseInt(s.num.textContent,10)||0;
@@ -356,7 +395,7 @@ function primeAfterCounts(){  // legacy helper
     n.fail_count=tgt.fail;
     n.total_count=tgt.total;
     if(info){
-      ['pass','hold','fail','total'].forEach(k=>{
+      ['pass','hold','fail'].forEach(k=>{
         if(info.els[k])info.els[k].target=tgt[k];
       });
     }
@@ -377,7 +416,7 @@ function pipeNode(id,x,y,w,h,icon,name,grad,trigger){
   const ic=svgEl('text',{x:x,y:y-2,'font-size':'36px','text-anchor':'middle','dominant-baseline':'central'});
   ic.textContent=icon; g.appendChild(ic);
   // 이름 (n8n: 노드 아래)
-  const nm=svgEl('text',{x:x,y:y+h/2+20,fill:C_TEXT,'font-size':'19px','font-weight':'900','text-anchor':'middle','dominant-baseline':'hanging'});
+  const nm=svgEl('text',{x:x,y:y+h/2+20,fill:C_TEXT,'font-size':'22px','font-weight':'950','text-anchor':'middle','dominant-baseline':'hanging'});
   nm.textContent=name; g.appendChild(nm);
   // 입력/출력 엔드포인트
   if(!trigger)g.appendChild(svgEl('circle',{cx:x-w/2,cy:y,r:7,fill:'#ffffff',stroke:C_LINE,'stroke-width':2}));
@@ -386,19 +425,54 @@ function pipeNode(id,x,y,w,h,icon,name,grad,trigger){
   PNODE[id]={g,rect,x,y,w,h,baseFill:'url(#g-node)'};
   return PNODE[id];
 }
+function addStackedText(g,x,y,lines,maxWidth,fontSize,lineGap){
+  const arr=Array.isArray(lines)?lines:String(lines).split('\\n');
+  const total=(arr.length-1)*lineGap;
+  arr.forEach((line,i)=>{
+    const t=svgEl('text',{x:x,y:y-total/2+i*lineGap,fill:C_TEXT,'font-size':`${fontSize}px`,'font-weight':'900','text-anchor':'middle','dominant-baseline':'central'});
+    t.textContent=line;
+    g.appendChild(t);
+    fitSvgText(t,maxWidth,13);
+  });
+}
 function pipeChip(id,x,y,w,icon,name,color){
-  const h=50;
+  const h=78;
   const g=svgEl('g');
-  const rect=svgEl('rect',{x:x-w/2,y:y-h/2,width:w,height:h,rx:12,fill:'#ffffff',
+  const rect=svgEl('rect',{x:x-w/2,y:y-h/2,width:w,height:h,rx:10,fill:'#ffffff',
     stroke:C_NODE_STROKE,'stroke-width':1.8,filter:'url(#soft)'});
   g.appendChild(rect);
   g.appendChild(svgEl('rect',{x:x-w/2,y:y-h/2,width:8,height:h,rx:4,fill:color}));
-  const t=svgEl('text',{x:x+4,y:y,fill:C_TEXT,'font-size':'18px','font-weight':'850','text-anchor':'middle','dominant-baseline':'central'});
-  t.textContent=icon+' '+name; g.appendChild(t);
-  fitSvgText(t,w-22,14);
+  const ic=svgEl('text',{x:x,y:y-16,'font-size':'22px','text-anchor':'middle','dominant-baseline':'central'});
+  ic.textContent=icon; g.appendChild(ic);
+  addStackedText(g,x,y+17,name,w-24,17,18);
   pipeL.appendChild(g);
-  PNODE[id]={g,rect,x,y,w,h,color};
+  PNODE[id]={g,rect,x,y,w,h,color,restStroke:C_NODE_STROKE,restWidth:1.8};
   return PNODE[id];
+}
+function pipeSegmentGroup(groupId,x,y,w,h,items,accent){
+  const g=svgEl('g');
+  const outer=svgEl('rect',{x:x-w/2,y:y-h/2,width:w,height:h,rx:12,fill:'#ffffff',
+    stroke:'#0f3a5a','stroke-width':2.2,filter:'url(#soft)'});
+  g.appendChild(outer);
+  const segW=w/items.length;
+  items.forEach((item,i)=>{
+    const sx=x-w/2+segW*i;
+    const cx=sx+segW/2;
+    if(i>0){
+      g.appendChild(svgEl('line',{x1:sx,y1:y-h/2,x2:sx,y2:y+h/2,stroke:'#0f3a5a','stroke-width':1.8}));
+    }
+    const seg=svgEl('rect',{x:sx+2,y:y-h/2+2,width:segW-4,height:h-4,rx:i===0||i===items.length-1?9:0,
+      fill:'transparent',stroke:'transparent','stroke-width':3});
+    g.appendChild(seg);
+    const label=Array.isArray(item.lines)?item.lines.join(''):String(item.lines||item.name||'');
+    const tx=svgEl('text',{x:cx,y:y,fill:C_TEXT,'font-size':'25px','font-weight':'950',
+      'text-anchor':'middle','dominant-baseline':'central'});
+    tx.textContent=`${item.icon} ${label}`; g.appendChild(tx);
+    fitSvgText(tx,segW-20,18);
+    PNODE[item.id]={g,rect:seg,x:cx,y,w:segW,h,color:item.color,restStroke:'transparent',restWidth:3};
+  });
+  pipeL.appendChild(g);
+  return {g,x,y,w,h};
 }
 function wire(x1,y1,x2,y2,dashed){
   const ln=svgEl('path',{fill:'none',stroke:dashed?'rgba(127,137,140,.55)':C_LINE,'stroke-width':dashed?1.6:2.4,
@@ -415,7 +489,7 @@ function branchWire(parentId, childIds, opts){
   const parent=PNODE[parentId];
   const children=childIds.map(id=>PNODE[id]).filter(Boolean);
   if(!parent || !children.length)return;
-  const color=(opts&&opts.color)||'rgba(71,85,105,.30)';
+  const color=(opts&&opts.color)||'rgba(17,24,39,.82)';
   const startY=parent.y+parent.h/2+((opts&&opts.startOffset)||8);
   const childTop=Math.min(...children.map(c=>c.y-c.h/2));
   const minX=Math.min(parent.x,...children.map(c=>c.x));
@@ -428,18 +502,19 @@ function branchWire(parentId, childIds, opts){
     ...children.map(c=>`M${c.x} ${busY}L${c.x} ${c.y-c.h/2}`)
   ];
   paths.forEach(d=>{
-    const ln=svgEl('path',{fill:'none',stroke:color,'stroke-width':1.35,'stroke-dasharray':'5 7','stroke-linecap':'round',d});
+    const ln=svgEl('path',{fill:'none',stroke:color,'stroke-width':1.8,'stroke-dasharray':'5 7','stroke-linecap':'round',d});
     pipeL.insertBefore(ln,pipeL.firstChild);
   });
 }
 
 // 행 좌표 (가로 위치는 VW 비례 → 폭을 꽉 채움)
-const railY=B_Y0+34, judgeY=B_Y0+154, mfgY=B_Y0+226, refY=B_Y0+300;
-const PNW=138,PNH=72;
-pipeNode('start',VW*0.08,railY,PNW,PNH,'▶','Start','g-ocr',true);
-pipeNode('ocr',VW*0.33,railY,PNW,PNH,'🔍','OCR','g-ocr');
-pipeNode('llm',VW*0.62,railY,PNW,PNH,'🧠','판정','g-llm');
-pipeNode('end',VW*0.92,railY,PNW,PNH,'🏁','End','g-llm');
+const railY=B_Y0+46, groupY=B_Y0+188;
+const PNW=180,PNH=76;
+pipeNode('start',VW*0.08,railY,PNW,PNH,'▷','Start','g-ocr',true);
+pipeNode('structure',VW*0.28,railY,PNW+52,PNH,'🔍','구조분석','g-ocr');
+pipeNode('validate',VW*0.49,railY,PNW+8,PNH,'🛡️','검증','g-llm');
+pipeNode('judge',VW*0.70,railY,PNW+8,PNH,'🧠','판정','g-permit');
+pipeNode('end',VW*0.91,railY,PNW,PNH,'🏁','End','g-llm');
 
 // End 초록 박스 전체 클릭 영역.
 // 사용자가 보는 초록 rounded rectangle 자체를 누르면 최종 판정 화면으로 이동한다.
@@ -546,41 +621,48 @@ function installEndBoxClickArea(){
 }
 installEndBoxClickArea();
 // rail 연결선 + 흐름
-[['start','ocr'],['ocr','llm'],['llm','end']].forEach(([a,b],i)=>{
+[['start','structure'],['structure','validate'],['validate','judge'],['judge','end']].forEach(([a,b],i)=>{
   const A=PNODE[a],B=PNODE[b];
   wire(A.x+A.w/2,A.y,B.x-B.w/2,B.y,false);
   const fd=`M${A.x+A.w/2} ${A.y}C${A.x+A.w/2+(B.x-A.x)*.5} ${A.y},${B.x-B.w/2-(B.x-A.x)*.5} ${B.y},${B.x-B.w/2} ${B.y}`;
   const flow=svgEl('path',{'class':'edge-flow',d:fd,id:`pwf-${i}`}); pipeL.appendChild(flow);
 });
-// 판정 파트 (판정 노드 기준 상대 배치)
-const _lx=PNODE['llm'].x;
-const mainGap=Math.min(360,Math.max(285,(VW-360)/3.8));
-const dateX=Math.max(180,_lx-mainGap);
-const mfgX=_lx;
-const critX=Math.min(VW-190,_lx+mainGap);
-const mfgChildGap=Math.min(230,Math.max(190,(VW-320)/5));
-const refStart=Math.min(Math.max(190,critX-320),VW-735);
-pipeChip('date',dateX,judgeY,270,'📅','공정일자 정합성 검증',C_B);
-pipeChip('mfg',mfgX,judgeY,275,'🧾','제조정보 교차 검증',C_P);
-pipeChip('crit',critX,judgeY,245,'📏','시험 기준 판별',C_PU);
-// 제조정보 교차 검증 세부 항목
-pipeChip('mfg_qty',mfgX-mfgChildGap,mfgY,180,'⚖','제조량 검증',C_H);
-pipeChip('mfg_date',mfgX,mfgY,188,'📆','제조일자 검증',C_B);
-pipeChip('mfg_no',mfgX+mfgChildGap,mfgY,180,'#','제조번호 검증',C_P);
-// 시험기준 판별 참고 근거
-pipeChip('sym',refStart,refY,158,'⚖','기호 사전',C_H);
-pipeChip('permit',refStart+195,refY,160,'📑','허가서',C_PU);
-pipeChip('bio',refStart+495,refY,330,'📘','생물학적제제 기준 및 시험방법',C_B);
-// 판정 → 파트 (라벨 아래에서 분기)
-branchWire('llm',['date','mfg','crit'],{startOffset:42,color:'rgba(37,99,235,.30)'});
-// 제조정보 교차 검증 → 제조량·제조일자·제조번호
-branchWire('mfg',['mfg_qty','mfg_date','mfg_no'],{color:'rgba(5,150,105,.28)',busY:mfgY-36});
-// 시험기준판별 → 기호 사전·허가서·생물학적제제 기준 및 시험방법
-branchWire('crit',['sym','permit','bio'],{color:'rgba(124,58,237,.28)',busY:refY-38});
+// 검증 로직 그룹
+const valX=PNODE['validate'].x;
+const groupH=66;
+const GROUP_PAD=92;
+const GROUP_GAP=Math.max(76,Math.min(118,VW*.055));
+const GROUP_AVAILABLE=Math.max(1120,VW-GROUP_PAD*2-GROUP_GAP);
+const valW=Math.min(760,Math.max(560,GROUP_AVAILABLE*.49));
+const valGroupX=GROUP_PAD+valW/2;
+pipeSegmentGroup('validation-group',valGroupX,groupY,valW,groupH,[
+  {id:'pre',icon:'↕',lines:['선행 검증'],color:C_B},
+  {id:'mfg',icon:'🧾',lines:['제조량 검증'],color:C_P},
+  {id:'mfg_date',icon:'📆',lines:['제조일자 검증'],color:C_H},
+  {id:'mfg_no',icon:'🔢',lines:['제조번호 검증'],color:C_P}
+],'rgba(37,99,235,.42)');
+branchWire('validate',['pre','mfg','mfg_date','mfg_no'],{startOffset:52,color:'rgba(17,24,39,.92)',busY:groupY-68});
+const valCaption=svgEl('text',{x:valGroupX,y:groupY+groupH/2+42,fill:C_TEXT,'font-size':'30px','font-weight':'950','text-anchor':'middle'});
+valCaption.textContent='✹ 정합성 검증 로직'; pipeL.appendChild(valCaption);
+
+// 판정 참조 정보 그룹
+const judgeX=PNODE['judge'].x;
+const refW=Math.min(820,Math.max(600,GROUP_AVAILABLE-valW));
+const judgeGroupX=GROUP_PAD+valW+GROUP_GAP+refW/2;
+const refY=groupY;
+pipeSegmentGroup('judge-ref-group',judgeGroupX,refY,refW,groupH,[
+  {id:'pharm',icon:'📘',lines:['약전'],color:C_B},
+  {id:'permit',icon:'📑',lines:['허가서'],color:C_PU},
+  {id:'sym',icon:'⚖',lines:['기호사전'],color:C_H},
+  {id:'bio',icon:'📗',lines:['생기법'],color:C_P}
+],'rgba(37,99,235,.42)');
+branchWire('judge',['pharm','permit','sym','bio'],{startOffset:52,color:'rgba(17,24,39,.92)',busY:refY-68});
+const judgeCaption=svgEl('text',{x:judgeGroupX,y:refY+groupH/2+42,fill:C_TEXT,'font-size':'30px','font-weight':'950','text-anchor':'middle'});
+judgeCaption.textContent='📘 판정 근거 정보'; pipeL.appendChild(judgeCaption);
 
 // ── 점등 헬퍼 ──
 function railSet(activeId,color){
-  ['start','ocr','llm','end'].forEach(id=>{
+  ['start','structure','validate','judge','end'].forEach(id=>{
     const p=PNODE[id];
     if(id===activeId){gsap.to(p.rect,{attr:{stroke:color,'stroke-width':3.2},duration:.3});p.g.style.filter='drop-shadow(0 0 16px '+color+'aa)';}
     else{gsap.to(p.rect,{attr:{stroke:C_NODE_STROKE,'stroke-width':2,fill:p.baseFill},duration:.3});p.g.style.filter='';}
@@ -593,7 +675,7 @@ function railFinish(){
   enableEndBoxNavigation();
 }
 function chipGlow(id,color){const p=PNODE[id];const c=color||p.color;p.rect.setAttribute('stroke',c);p.rect.setAttribute('stroke-width',2.8);p.g.style.filter='drop-shadow(0 0 14px '+c+'cc)';}
-function chipDim(id){const p=PNODE[id];p.rect.setAttribute('stroke',C_NODE_STROKE);p.rect.setAttribute('stroke-width',1.8);p.g.style.filter='';}
+function chipDim(id){const p=PNODE[id];p.rect.setAttribute('stroke',p.restStroke||C_NODE_STROKE);p.rect.setAttribute('stroke-width',p.restWidth||1.8);p.g.style.filter='';}
 
 // ════════ 봇 ════════
 function createBot(gradId,accent,label){
@@ -611,13 +693,14 @@ function createBot(gradId,accent,label){
   nm.textContent=label; g.appendChild(nm);
   botL.appendChild(g); return g;
 }
-const ocrBot=createBot('g-ocr',C_B,'OCR봇');
-const llmBot=createBot('g-llm',C_P,'판정봇');
+const structureBot=createBot('g-ocr',C_B,'구조분석봇');
+const validateBot=createBot('g-llm',C_P,'검증봇');
+const judgeBot=createBot('g-permit',C_PU,'판정봇');
 
 const st=document.getElementById('status-text');
 
 // ════════ 타임라인 ════════
-const MOVE=0.34,DRAW=0.42,OCR_STEP=0.58,REV=0.45,BOT_OFFSET=72;
+const MOVE=0.34,DRAW=0.42,OCR_STEP=0.58,REV=0.45,BOT_OFFSET=72,TOP_BOT_OFFSET=denseGraph?44:72;
 let built=false,finished=false,running=false,tl=null;
 
 function buildTimeline(){
@@ -627,108 +710,82 @@ function buildTimeline(){
   // ── Start ──
   tl.call(()=>{railSet('start',C_B);st.textContent='제조 요약도 입력 — 검수 시작';},[],t);
   t+=.6;
-  tl.call(()=>{railSet('ocr',C_B);document.getElementById('pwf-0').classList.add('on');},[],t);
+  tl.call(()=>{railSet('structure',C_B);document.getElementById('pwf-0').classList.add('on');},[],t);
 
-  // ── Phase 1 : OCR봇 작도 (좌→우) ──
+  // ── Phase 1 : 구조분석봇 작도 (좌→우) ──
   const fn=nodesById[topo[0]];
-  tl.set(ocrBot,{x:fn._cx,y:fn._y0-BOT_OFFSET,opacity:0},t);
-  tl.to(ocrBot,{opacity:1,duration:.4},t); t+=.4;
+  tl.set(structureBot,{x:fn._cx,y:fn._y0-TOP_BOT_OFFSET,opacity:0},t);
+  tl.to(structureBot,{opacity:1,duration:.4},t); t+=.4;
   topo.forEach(nid=>{
     const n=nodesById[nid],bx=boxes[nid];
-    tl.to(ocrBot,{x:n._cx,y:n._y0-BOT_OFFSET,duration:MOVE,ease:'power2.inOut',
-      onStart:()=>{st.textContent=`OCR봇: 제조 요약도 작도 — ${n.label}`}},t);
+    tl.to(structureBot,{x:n._cx,y:n._y0-TOP_BOT_OFFSET,duration:MOVE,ease:'power2.inOut',
+      onStart:()=>{st.textContent=`구조분석봇: 제조 요약도 구조 작도 — ${n.label}`}},t);
     DATA.edges.forEach((e,ei)=>{if(e.target===nid&&edgeEls[ei])tl.to(edgeEls[ei].el,{opacity:1,duration:.3},t)});
     tl.to(bx.g,{opacity:1,duration:.2},t+MOVE);
     tl.to(bx.rect,{strokeDashoffset:0,duration:DRAW,ease:'power1.inOut'},t+MOVE);
     t+=OCR_STEP;
   });
-  tl.to(ocrBot,{opacity:0,duration:.3},t);
+  tl.to(structureBot,{opacity:0,duration:.3},t);
   t+=.25;
 
-  // ── 판정 준비 ──
-  // 여기까지는 제조요약도 구조를 만들고, 이후 문서 기준과 참고 근거를 대조한다.
-  tl.call(()=>{railSet('llm',C_P);document.getElementById('pwf-1').classList.add('on');},[],t);
-  t+=.55;
-
-  // ── 판정봇 판정 ──
-  //   Sweep A: 공정일자 정합성 → Sweep B: 제조정보 교차 검증 → Sweep C: 시험 기준 판별
+  // ── Phase 2 : 검증봇 — 구조분석 결과를 노드별로 검증 ──
+  tl.call(()=>{railSet('validate',C_P);document.getElementById('pwf-1').classList.add('on');},[],t);
+  t+=.5;
   const jn=nodesById[topo[0]];
-  tl.set(llmBot,{x:jn._cx,y:jn._y0-BOT_OFFSET,opacity:0},t);
-  tl.to(llmBot,{opacity:1,duration:.4},t); t+=.4;
+  tl.set(validateBot,{x:jn._cx,y:jn._y0-TOP_BOT_OFFSET,opacity:0},t);
+  tl.to(validateBot,{opacity:1,duration:.35},t); t+=.35;
   tl.call(()=>{DATA.edges.forEach((e,ei)=>{if(edgeEls[ei])edgeEls[ei].flow.classList.add('on')})},[],t);
-
-  const sym=PNODE['sym'],permit=PNODE['permit'],bio=PNODE['bio'];
-  const mfgQty=PNODE['mfg_qty'],mfgDate=PNODE['mfg_date'],mfgNo=PNODE['mfg_no'];
-
-  // ── Sweep A : 공정일자 정합성 검증 (전 노드 훑기) ──
-  tl.call(()=>{chipGlow('date');st.textContent='판정봇: 공정일자 정합성 검증';},[],t);
+  const pre=PNODE['pre'],mfg=PNODE['mfg'],mfgDate=PNODE['mfg_date'],mfgNo=PNODE['mfg_no'];
   topo.forEach(nid=>{
     const n=nodesById[nid];
-    tl.to(llmBot,{x:n._cx,y:n._y0-BOT_OFFSET,duration:.38,ease:'power2.inOut',
-      onStart:()=>{st.textContent=`판정봇: 공정일자 정합성 검증 — ${n.label}`}},t);
-    tl.fromTo(boxes[nid].rect,{},{attr:{stroke:C_B,'stroke-width':3.2},duration:.2,yoyo:true,repeat:1},'>');
-    t+=.46;
-  });
-  tl.call(()=>chipDim('date'),[],t);
-  tl.to(llmBot,{opacity:0,duration:.25},t+.1);
-  t+=.45;
-
-  tl.set(llmBot,{x:jn._cx,y:jn._y0-BOT_OFFSET,opacity:0},t);
-  tl.to(llmBot,{opacity:1,duration:.35},t);
-  t+=.35;
-
-  // ── Sweep B : 제조정보 교차 검증 → 제조량·제조일자·제조번호 검증 (전 노드 훑기) ──
-  tl.call(()=>{chipGlow('mfg');st.textContent='판정봇: 제조정보 교차 검증 시작';},[],t);
-  topo.forEach(nid=>{
-    const n=nodesById[nid];
-    tl.to(llmBot,{x:n._cx,y:n._y0-BOT_OFFSET,duration:MOVE,ease:'power2.inOut',
-      onStart:()=>{st.textContent=`판정봇: 제조정보 교차 검증 — ${n.label}`}},t);
+    tl.to(validateBot,{x:n._cx,y:n._y0-TOP_BOT_OFFSET,duration:MOVE,ease:'power2.inOut',
+      onStart:()=>{st.textContent=`검증봇: 구조분석 박스 확인 — ${n.label}`}},t);
     tl.fromTo(boxes[nid].rect,{},{attr:{stroke:C_P,'stroke-width':3.2},duration:.2,yoyo:true,repeat:1},'>');
-    tl.to(llmBot,{x:PNODE['mfg'].x,y:PNODE['mfg'].y-48,duration:.26,ease:'power2.inOut',
-      onStart:()=>{chipGlow('mfg');st.textContent=`판정봇: 제조정보 교차 검증 상위 항목 확인 (${n.label})`}},'>');
-    tl.to(llmBot,{x:mfgQty.x,y:mfgQty.y-48,duration:.24,ease:'power2.inOut',
-      onStart:()=>{chipGlow('mfg_qty');st.textContent=`판정봇: 제조량 검증 (${n.label})`}},'>');
-    tl.to(llmBot,{x:mfgDate.x,y:mfgDate.y-48,duration:.24,ease:'power2.inOut',
-      onStart:()=>{chipDim('mfg_qty');chipGlow('mfg_date');st.textContent=`판정봇: 제조일자 검증 (${n.label})`}},'>');
-    tl.to(llmBot,{x:mfgNo.x,y:mfgNo.y-48,duration:.24,ease:'power2.inOut',
-      onStart:()=>{chipDim('mfg_date');chipGlow('mfg_no');st.textContent=`판정봇: 제조번호 검증 (${n.label})`}},'>');
-    tl.to(llmBot,{x:n._cx,y:n._y0-BOT_OFFSET,duration:.26,ease:'power2.inOut',onStart:()=>chipDim('mfg_no')},'>');
-    t+=1.48;
+    tl.to(validateBot,{x:pre.x,y:pre.y-50,duration:.24,ease:'power2.inOut',
+      onStart:()=>{chipGlow('pre');st.textContent=`검증봇: 선행검증 (${n.label})`}},'>');
+    tl.to(validateBot,{x:mfg.x,y:mfg.y-50,duration:.24,ease:'power2.inOut',
+      onStart:()=>{chipDim('pre');chipGlow('mfg');st.textContent=`검증봇: 제조검증 (${n.label})`}},'>');
+    tl.to(validateBot,{x:mfgDate.x,y:mfgDate.y-50,duration:.24,ease:'power2.inOut',
+      onStart:()=>{chipDim('mfg');chipGlow('mfg_date');st.textContent=`검증봇: 제조일자 검증 (${n.label})`}},'>');
+    tl.to(validateBot,{x:mfgNo.x,y:mfgNo.y-50,duration:.24,ease:'power2.inOut',
+      onStart:()=>{chipDim('mfg_date');chipGlow('mfg_no');st.textContent=`검증봇: 제조번호 검증 (${n.label})`}},'>');
+    tl.call(()=>chipDim('mfg_no'),[], '>');
+    t+=1.56;
   });
-  tl.call(()=>{chipDim('mfg');},[],t); t+=.2;
-  tl.to(llmBot,{opacity:0,duration:.3},t);
+  tl.to(validateBot,{opacity:0,duration:.3},t);
   t+=.4;
 
-  tl.set(llmBot,{x:jn._cx,y:jn._y0-BOT_OFFSET,opacity:0},t);
-  tl.to(llmBot,{opacity:1,duration:.35},t);
-  t+=.35;
-
-  // ── Sweep C : 시험 기준 판별 → 기호 사전·허가서·기준서 → 카운트업 (전 노드 훑기) ──
-  tl.call(()=>{chipGlow('crit');st.textContent='판정봇: 시험 기준 판별 시작';},[],t);
+  // ── Phase 3 : 판정봇 — 판정 참조 정보를 노드별로 확인하고 SUMMARY 갱신 ──
+  tl.call(()=>{railSet('judge',C_PU);document.getElementById('pwf-2').classList.add('on');},[],t);
+  tl.set(judgeBot,{x:jn._cx,y:jn._y0-TOP_BOT_OFFSET,opacity:0},t);
+  tl.to(judgeBot,{opacity:1,duration:.35},t);
+  t+=.45;
+  const pharm=PNODE['pharm'],permit=PNODE['permit'],sym=PNODE['sym'],bio=PNODE['bio'];
   topo.forEach(nid=>{
     const n=nodesById[nid];
-    tl.to(llmBot,{x:n._cx,y:n._y0-BOT_OFFSET,duration:MOVE,ease:'power2.inOut',
-      onStart:()=>{st.textContent=`판정봇: 시험 기준 판별 — 기호 사전 확인 (${n.label})`}},t);
-    tl.to(llmBot,{x:critX,y:judgeY-48,duration:.24,ease:'power2.inOut',
-      onStart:()=>{chipGlow('crit');st.textContent=`판정봇: 시험 기준 판별 상위 항목 확인 (${n.label})`}},'>');
-    tl.to(llmBot,{x:sym.x,y:sym.y-48,duration:.24,ease:'power2.inOut',onStart:()=>chipGlow('sym')},'>');
-    tl.to(llmBot,{x:permit.x,y:permit.y-48,duration:.22,ease:'power2.inOut',
-      onStart:()=>{chipDim('sym');chipGlow('permit');st.textContent=`판정봇: 시험 기준 판별 — 허가서 확인 (${n.label})`}},'>');
-    tl.to(llmBot,{x:bio.x,y:bio.y-48,duration:.24,ease:'power2.inOut',
-      onStart:()=>{chipDim('permit');chipGlow('bio');st.textContent=`판정봇: 시험 기준 판별 — 생물학적제제 기준 및 시험방법 확인 (${n.label})`}},'>');
-    tl.to(llmBot,{x:n._cx,y:n._y0-BOT_OFFSET,duration:.26,ease:'power2.inOut',onStart:()=>chipDim('bio')},'>');
-    t+=MOVE+1.02;
-    // → 그 다음 숫자 카운트업.
-    tl.call(()=>{showInd(nid);countUp(nid);st.textContent=`판정봇: 판정 결과 집계 — ${n.label}`;},[],t);
-    t+=.62;
+    tl.to(judgeBot,{x:n._cx,y:n._y0-TOP_BOT_OFFSET,duration:MOVE,ease:'power2.inOut',
+      onStart:()=>{updateSummary(nid);st.textContent=`판정봇: 판정 대상 확인 — ${n.label}`}},t);
+    tl.fromTo(boxes[nid].rect,{},{attr:{stroke:C_PU,'stroke-width':3.2},duration:.2,yoyo:true,repeat:1},'>');
+    tl.to(judgeBot,{x:pharm.x,y:pharm.y-50,duration:.24,ease:'power2.inOut',
+      onStart:()=>{chipGlow('pharm');updateSummary(nid);st.textContent=`판정봇: 약전 확인 (${n.label})`}},'>');
+    tl.to(judgeBot,{x:permit.x,y:permit.y-50,duration:.24,ease:'power2.inOut',
+      onStart:()=>{chipDim('pharm');chipGlow('permit');updateSummary(nid);st.textContent=`판정봇: 허가서 확인 (${n.label})`}},'>');
+    tl.to(judgeBot,{x:sym.x,y:sym.y-50,duration:.24,ease:'power2.inOut',
+      onStart:()=>{chipDim('permit');chipGlow('sym');updateSummary(nid);st.textContent=`판정봇: 기호사전 확인 (${n.label})`}},'>');
+    tl.to(judgeBot,{x:bio.x,y:bio.y-50,duration:.26,ease:'power2.inOut',
+      onStart:()=>{chipDim('sym');chipGlow('bio');updateSummary(nid);st.textContent=`판정봇: 생기법 확인 (${n.label})`}},'>');
+    tl.to(judgeBot,{x:n._cx,y:n._y0-TOP_BOT_OFFSET,duration:.25,ease:'power2.inOut',
+      onStart:()=>chipDim('bio')},'>');
+    t+=1.46;
+    tl.call(()=>{showInd(nid);countUp(nid);st.textContent=`판정봇: SUMMARY 갱신 — ${n.label}`;},[],t);
+    t+=.58;
   });
-  tl.call(()=>{chipDim('crit');},[],t); t+=.2;
-  tl.to(llmBot,{opacity:0,duration:.3},t);
+  tl.to(judgeBot,{opacity:0,duration:.3},t);
   t+=.4;
 
   // ── 마무리: End 만 색칠 ──
-  tl.call(()=>{if(PERMIT_ENABLED)finalizeAfter();document.getElementById('pwf-2').classList.add('on');railFinish();
-    st.textContent='✅ 검수 완료 — 공정일자 정합성 검증, 제조정보 교차 검증, 시험 기준 판별 완료';},[],t+.6);
+  tl.call(()=>{if(PERMIT_ENABLED)finalizeAfter();document.getElementById('pwf-3').classList.add('on');railFinish();
+    st.textContent='✅ 검수 완료 — 구조분석, 검증, 판정 완료';},[],t+.6);
   return tl;
 }
 
@@ -745,7 +802,7 @@ function finalizeAfter(){  // 종료 시 전 노드의 표시를 after 최종값
     n.hold_count=tgt.hold;
     n.fail_count=tgt.fail;
     n.total_count=tgt.total;
-    ['pass','hold','fail','total'].forEach(k=>{
+    ['pass','hold','fail'].forEach(k=>{
       const s=info.els[k];
       s.num.textContent=tgt[k];
       s.num.setAttribute('fill',s.color);
@@ -758,8 +815,6 @@ function finalizeAfter(){  // 종료 시 전 노드의 표시를 after 최종값
 const startP=PNODE['start'];
 const ring=svgEl('circle',{id:'start-ring',cx:startP.x,cy:startP.y,r:44,fill:'none',stroke:C_B,'stroke-width':3,opacity:.5});
 hintL.appendChild(ring);
-const hintTxt=svgEl('text',{x:startP.x,y:startP.y+PNH/2+68,fill:C_B,'font-size':'17px','font-weight':'900','text-anchor':'middle'});
-hintTxt.textContent='클릭하여 시작 ▶'; hintL.appendChild(hintTxt);
 // 클릭 영역
 const hit=svgEl('rect',{x:startP.x-startP.w/2,y:startP.y-startP.h/2,width:startP.w,height:startP.h,rx:startP.h/2,fill:'transparent','class':'start-hint'});
 hintL.appendChild(hit);
@@ -779,4 +834,5 @@ hit.addEventListener('mouseleave',()=>{if(!running){startP.rect.setAttribute('st
 </script>
 </body>
 </html>
+
 """

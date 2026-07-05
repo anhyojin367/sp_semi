@@ -247,7 +247,7 @@ def _normalize_quantity(value: str | None) -> tuple[str, str]:
     value = re.sub(r"\s+", " ", value).strip()
 
     m = re.fullmatch(
-        r"([0-9]+(?:\.[0-9]+)?)\s*(L|l|mL|ml|uL|ul|dose|doses|Dose|Doses|도즈|병|바이알|vial|vials|Vial|Vials|개|ea|EA)?",
+        r"([0-9]+(?:\.[0-9]+)?)\s*(L|l|mL|ml|uL|ul|kg|KG|Kg|g|G|dose|doses|Dose|Doses|도즈|병|바이알|vial|vials|Vial|Vials|개|ea|EA)?",
         value,
         flags=re.I,
     )
@@ -265,6 +265,10 @@ def _normalize_quantity(value: str | None) -> tuple[str, str]:
         unit_key = "ml"
     elif unit_key in {"ul", "μl", "µl"}:
         unit_key = "ul"
+    elif unit_key in {"kg"}:
+        unit_key = "kg"
+    elif unit_key in {"g"}:
+        unit_key = "g"
     elif unit_key in {"dose", "doses", "도즈"}:
         unit_key = "dose"
     elif unit_key in {"병", "바이알", "vial", "vials", "개", "ea"}:
@@ -373,7 +377,7 @@ def _looks_like_quantity_only(candidate: str | None) -> bool:
     # 26A01, B2604, P26-1, F26-1처럼 문자와 숫자가 섞인 제조번호는
     # _normalize_quantity()가 앞 숫자만 보고 수량으로 오인할 수 있으므로 여기서 제외한다.
     if re.search(r"[A-Za-z]", candidate):
-        unit_words = r"L|l|mL|ml|uL|ul|병|바이알|vial|vials|개|EA|ea|dose|doses|도즈"
+        unit_words = r"L|l|mL|ml|uL|ul|kg|KG|Kg|g|G|병|바이알|vial|vials|개|EA|ea|dose|doses|도즈"
         return bool(re.fullmatch(rf"[0-9][0-9,]*(?:\.[0-9]+)?\s*(?:{unit_words})", candidate, flags=re.I))
 
     # 3/21 같은 페이지 표기는 제조번호가 아니다.
@@ -382,7 +386,7 @@ def _looks_like_quantity_only(candidate: str | None) -> bool:
 
     # 단위가 명시된 값은 수량이다.
     if re.fullmatch(
-        r"[0-9][0-9,]*(?:\.[0-9]+)?\s*(?:L|l|mL|ml|uL|ul|병|바이알|vial|vials|개|EA|ea|dose|doses|도즈)",
+        r"[0-9][0-9,]*(?:\.[0-9]+)?\s*(?:L|l|mL|ml|uL|ul|kg|KG|Kg|g|G|병|바이알|vial|vials|개|EA|ea|dose|doses|도즈)",
         candidate,
         flags=re.I,
     ):
@@ -787,22 +791,46 @@ def extract_summary_items_from_records(records_source: Any) -> list[Manufacturin
             pdf_items = _extract_summary_items_from_pdf_page(pdf_path)
 
             if pdf_items:
-                ordered = list(pdf_items)
-                ordered_keys = {
-                    _norm_match(item.stage_name)
-                    for item in ordered
+                pdf_by_key = {
+                    _norm_match(item.stage_name): item
+                    for item in pdf_items
                     if _norm_match(item.stage_name)
                 }
 
-                for item in out:
-                    key = _norm_match(item.stage_name)
+                if out:
+                    merged: list[ManufacturingInfoItem] = []
+                    merged_keys: set[str] = set()
 
-                    if key and key not in ordered_keys:
-                        ordered.append(item)
-                        ordered_keys.add(key)
+                    for item in out:
+                        key = _norm_match(item.stage_name)
+                        pdf_item = pdf_by_key.get(key)
 
-                if ordered:
-                    return ordered
+                        if pdf_item is not None:
+                            item = ManufacturingInfoItem(
+                                stage_name=item.stage_name,
+                                manufacturing_no=item.manufacturing_no or pdf_item.manufacturing_no,
+                                manufacturing_date=item.manufacturing_date or pdf_item.manufacturing_date,
+                                quantity=item.quantity or pdf_item.quantity,
+                                quantity_field_name=(
+                                    item.quantity_field_name
+                                    or pdf_item.quantity_field_name
+                                ),
+                                page_number=item.page_number or pdf_item.page_number,
+                            )
+
+                        merged.append(item)
+                        if key:
+                            merged_keys.add(key)
+
+                    for pdf_item in pdf_items:
+                        key = _norm_match(pdf_item.stage_name)
+                        if key and key not in merged_keys:
+                            merged.append(pdf_item)
+                            merged_keys.add(key)
+
+                    return merged
+
+                return pdf_items
     except Exception:
         pass
 
@@ -1039,7 +1067,10 @@ def _extract_field_value_from_text(text: str, field_name: str) -> str:
         for idx, line in enumerate(lines):
             if re.search(r"(제조년월일|제조년원일|제조일자|제조일|제조\s*년월\s*일)", line) and idx > 0:
                 candidate = clean_text(lines[idx - 1])
-                if _normalize_date_parts(candidate) != ("", "", ""):
+                if (
+                    _normalize_date_parts(candidate) != ("", "", "")
+                    and re.fullmatch(rf"\s*{_date_regex()}\s*\.?", candidate)
+                ):
                     return candidate
 
         value = _extract_value_after_label_from_lines(
@@ -1668,7 +1699,7 @@ def _date_regex() -> str:
 
 
 def _quantity_regex() -> str:
-    return r"[0-9][0-9,]*(?:\.[0-9]+)?\s*(?:L|l|mL|ml|병|바이알|vial|Vial|개|EA|ea)?"
+    return r"[0-9][0-9,]*(?:\.[0-9]+)?\s*(?:L|l|mL|ml|kg|KG|Kg|g|G|병|바이알|vial|Vial|개|EA|ea)?"
 
 
 def _append_unit_if_missing(quantity: str, default_unit: str) -> str:
@@ -1677,7 +1708,7 @@ def _append_unit_if_missing(quantity: str, default_unit: str) -> str:
     if not quantity:
         return ""
 
-    if re.search(r"(L|l|mL|ml|병|바이알|vial|Vial|개|EA|ea)\b", quantity):
+    if re.search(r"(L|l|mL|ml|kg|KG|Kg|g|G|병|바이알|vial|Vial|개|EA|ea)\b", quantity):
         return quantity
 
     return clean_text(f"{quantity} {default_unit}")
@@ -1726,7 +1757,7 @@ def _extract_row_by_code_for_fraction(text: str, code: str) -> ManufacturingInfo
     if not m:
         return None
 
-    quantity = _append_unit_if_missing(m.group("qty"), "L")
+    quantity = _append_unit_if_missing(m.group("qty"), "kg")
 
     return ManufacturingInfoItem(
         stage_name="",
@@ -1904,6 +1935,30 @@ def _extract_stage_from_text_by_patterns(stage_name: str, text: str) -> Manufact
     return None
 
 
+def _item_matches_summary_values(summary_item: ManufacturingInfoItem, item: ManufacturingInfoItem | None) -> bool:
+    if item is None:
+        return False
+
+    checks: list[bool] = []
+
+    if summary_item.manufacturing_no:
+        if not item.manufacturing_no:
+            return False
+        checks.append(_code_matches(summary_item.manufacturing_no, item.manufacturing_no))
+
+    if summary_item.manufacturing_date:
+        if not item.manufacturing_date:
+            return False
+        checks.append(_date_matches(summary_item.manufacturing_date, item.manufacturing_date))
+
+    if summary_item.quantity:
+        if not item.quantity:
+            return False
+        checks.append(_quantity_matches(summary_item.quantity, item.quantity))
+
+    return bool(checks) and all(checks)
+
+
 def _item_has_required_summary_fields(summary_item: ManufacturingInfoItem, item: ManufacturingInfoItem | None) -> bool:
     if item is None:
         return False
@@ -1951,6 +2006,28 @@ def _text_contains_summary_date(text: str, date_value: str) -> bool:
 
     for m in re.finditer(r"20\d{2}\s*(?:[.\-/년]\s*)?\d{1,2}(?:\s*(?:[.\-/월]\s*)?\d{1,2})?", clean_text(text)):
         if _date_matches(date_value, m.group(0)):
+            return True
+
+    return False
+
+
+def _text_contains_summary_manufacturing_date(text: str, date_value: str) -> bool:
+    target_year, target_month, target_day = _normalize_date_parts(date_value)
+    if not target_year:
+        return False
+
+    lines = _split_lines(text)
+    label_re = re.compile(
+        r"(제조년월일|제조년원일|제조일자|제조\s*년월\s*일)",
+        flags=re.I,
+    )
+
+    for idx, line in enumerate(lines):
+        if not label_re.search(line):
+            continue
+
+        window = "\n".join(lines[max(0, idx - 1) : min(len(lines), idx + 3)])
+        if _text_contains_summary_date(window, date_value):
             return True
 
     return False
@@ -2016,7 +2093,7 @@ def _repair_item_from_exact_summary_presence(
 
     if summary_item.manufacturing_date:
         if not manufacturing_date or not _date_matches(summary_item.manufacturing_date, manufacturing_date):
-            if _text_contains_summary_date(text, summary_item.manufacturing_date):
+            if _text_contains_summary_manufacturing_date(text, summary_item.manufacturing_date):
                 manufacturing_date = summary_item.manufacturing_date
 
     if summary_item.quantity:
@@ -2151,6 +2228,34 @@ def _extract_final_bulk_from_records(records: list[Any], summary_item: Manufactu
     return best_partial
 
 
+def _extract_summary_info_item_from_records(
+    records: list[Any],
+    summary_item: ManufacturingInfoItem,
+) -> tuple[ManufacturingInfoItem | None, Any | None]:
+    """Extract one stage directly from section 1.2 제조요약정보 when it is present."""
+    record = _find_record_by_section(records, ["1.2"])
+
+    if record is None:
+        return None, None
+
+    text = _join_record_text(record)
+    if not text:
+        return None, None
+
+    item = _extract_stage_from_text_by_patterns(summary_item.stage_name, text)
+    if item is None:
+        return None, None
+
+    item.stage_name = summary_item.stage_name
+    item.page_number = _get(record, "page_start", None)
+    item.quantity_field_name = item.quantity_field_name or summary_item.quantity_field_name
+
+    if _item_has_any_value(item):
+        return item, record
+
+    return None, None
+
+
 def _extract_finished_product_from_records(records: list[Any], summary_item: ManufacturingInfoItem) -> ManufacturingInfoItem | None:
     best_partial: ManufacturingInfoItem | None = None
 
@@ -2214,6 +2319,13 @@ def _extract_document_item_from_json_rules(
     """
     stage_key = _norm_match(summary_item.stage_name)
     summary_code = clean_text(summary_item.manufacturing_no)
+
+    summary_info_item, _summary_info_record = _extract_summary_info_item_from_records(
+        records,
+        summary_item,
+    )
+    if summary_info_item is not None and _item_matches_summary_values(summary_item, summary_info_item):
+        return summary_info_item
 
     # 원료혈장1/2/3: 3.1.1 원료혈장 정보 표의 식별번호 행과 매핑
     if "원료혈장" in stage_key:
@@ -2625,6 +2737,79 @@ def _extract_tabular_occurrence_by_code(
     return None
 
 
+def _extract_fraction_occurrence_by_date_quantity(
+    summary_item: ManufacturingInfoItem,
+    text: str,
+) -> ManufacturingInfoItem | None:
+    """
+    원획분 표에서 제조번호가 틀린 행도 잡기 위해 제조년월일+제조량으로 행을 찾는다.
+    예: 제조요약도 원획분3은 F26-3인데 3.2.1 행이 F26-5로 잘못 적힌 경우.
+    """
+    if "원획분" not in _norm_match(summary_item.stage_name):
+        return None
+
+    if not summary_item.manufacturing_date or not summary_item.quantity:
+        return None
+
+    target_qty_number, target_qty_unit = _normalize_quantity(summary_item.quantity)
+    if not target_qty_number:
+        return None
+
+    for line in _split_lines(text):
+        cells = [
+            _clean_table_extracted_value(cell)
+            for cell in re.split(r"\s*\|\s*", line)
+            if _clean_table_extracted_value(cell)
+        ]
+        if len(cells) < 4:
+            continue
+        if any("제조번호" in cell for cell in cells):
+            continue
+
+        date_match = any(
+            _normalize_date_parts(cell) != ("", "", "")
+            and _date_matches(summary_item.manufacturing_date, cell)
+            for cell in cells
+        )
+        if not date_match:
+            continue
+
+        quantity_cell = ""
+        for cell in cells[1:]:
+            number, _unit = _normalize_quantity(cell)
+            if number and _quantity_matches(summary_item.quantity, cell):
+                quantity_cell = cell
+                break
+        if not quantity_cell:
+            continue
+
+        code_match = re.search(r"\b[A-Z]{1,5}\d{2,}(?:-[A-Z0-9]+)?\b", cells[0], flags=re.I)
+        if not code_match:
+            continue
+
+        manufacturing_no = clean_text(code_match.group(0))
+        manufacturing_date = next(
+            (
+                clean_text(cell)
+                for cell in cells
+                if _normalize_date_parts(cell) != ("", "", "")
+                and _date_matches(summary_item.manufacturing_date, cell)
+            ),
+            "",
+        )
+        quantity = _append_unit_if_missing(quantity_cell, target_qty_unit or "kg")
+
+        return ManufacturingInfoItem(
+            stage_name=summary_item.stage_name,
+            manufacturing_no=manufacturing_no,
+            manufacturing_date=manufacturing_date,
+            quantity=quantity,
+            quantity_field_name=summary_item.quantity_field_name or "제조량",
+        )
+
+    return None
+
+
 def _extract_stage_reference_code(
     summary_item: ManufacturingInfoItem,
     text: str,
@@ -2665,6 +2850,94 @@ def _extract_stage_reference_code(
     return ""
 
 
+def _should_use_summary_info_code_date_reference(summary_item: ManufacturingInfoItem) -> bool:
+    stage_key = _norm_match(summary_item.stage_name)
+
+    if not _has_numbered_stage_suffix(summary_item.stage_name):
+        return False
+
+    return bool("원료혈장" in stage_key or "원획분" in stage_key)
+
+
+def _summary_info_reference_matches(
+    summary_item: ManufacturingInfoItem,
+    item: ManufacturingInfoItem | None,
+) -> bool:
+    if item is None:
+        return False
+
+    if summary_item.manufacturing_no:
+        if not item.manufacturing_no or not _code_matches(summary_item.manufacturing_no, item.manufacturing_no):
+            return False
+
+    if summary_item.manufacturing_date:
+        if not item.manufacturing_date or not _date_matches(summary_item.manufacturing_date, item.manufacturing_date):
+            return False
+
+    if item.quantity and summary_item.quantity:
+        return _quantity_matches(summary_item.quantity, item.quantity)
+
+    return True
+
+
+def _extract_summary_info_code_date_reference(
+    records: list[Any],
+    summary_item: ManufacturingInfoItem,
+) -> tuple[ManufacturingInfoItem | None, Any | None]:
+    if not _should_use_summary_info_code_date_reference(summary_item):
+        return None, None
+
+    record = _find_record_by_section(records, ["1.2"])
+    if record is None:
+        return None, None
+
+    text = _join_record_text(record)
+    code = clean_text(summary_item.manufacturing_no)
+    code_pat = _code_regex(code)
+    if not text or not code_pat:
+        return None, None
+
+    match = re.search(
+        rf"(?P<code>{code_pat})\s*/\s*(?P<date>{_date_regex()})",
+        text,
+        flags=re.I,
+    )
+    if not match:
+        return None, None
+
+    item = ManufacturingInfoItem(
+        stage_name=summary_item.stage_name,
+        manufacturing_no=clean_text(match.group("code")),
+        manufacturing_date=clean_text(match.group("date")),
+        quantity="",
+        quantity_field_name=summary_item.quantity_field_name or "제조량",
+        page_number=_get(record, "page_start", None),
+    )
+    return item, record
+
+
+def _should_use_summary_item_as_occurrence(summary_item: ManufacturingInfoItem) -> bool:
+    stage_key = _norm_match(summary_item.stage_name)
+
+    if not stage_key:
+        return False
+
+    if "최종원액" in stage_key or "완제의약품" in stage_key:
+        return False
+
+    if not ("원료혈장" in stage_key or "원획분" in stage_key):
+        return False
+
+    if not _has_numbered_stage_suffix(summary_item.stage_name):
+        return False
+
+    return bool(
+        clean_text(summary_item.manufacturing_no)
+        and clean_text(summary_item.manufacturing_date)
+        and clean_text(summary_item.quantity)
+    )
+
+
 def collect_manufacturing_info_occurrences(
     records_source: Any,
     summary_items: list[ManufacturingInfoItem] | None = None,
@@ -2682,6 +2955,50 @@ def collect_manufacturing_info_occurrences(
         _norm_match(item.stage_name): [] for item in summary_items
     }
     seen: set[tuple[str, str, str, str, str]] = set()
+
+    for summary_item in summary_items:
+        stage_key = _norm_match(summary_item.stage_name)
+        item, record = _extract_summary_info_item_from_records(records, summary_item)
+        use_code_date_reference = False
+
+        if item is not None and record is not None:
+            if not _item_matches_summary_values(summary_item, item):
+                item, record = None, None
+
+        if item is None or record is None:
+            item, record = _extract_summary_info_code_date_reference(records, summary_item)
+            use_code_date_reference = item is not None and record is not None
+
+        if item is None or record is None:
+            continue
+
+        if use_code_date_reference and not _summary_info_reference_matches(summary_item, item):
+            continue
+
+        section_number = clean_text(_get(record, "section_number", ""))
+        page_number = _get(record, "page_start", None)
+        source_label = _record_source_label(record)
+        dedupe_key = (
+            stage_key,
+            source_label,
+            _normalize_code(item.manufacturing_no),
+            "-".join(_normalize_date_parts(item.manufacturing_date)),
+            "|".join(_normalize_quantity(item.quantity)),
+        )
+
+        if dedupe_key in seen:
+            continue
+
+        seen.add(dedupe_key)
+        out.setdefault(stage_key, []).append(
+            ManufacturingInfoOccurrence(
+                stage_name=summary_item.stage_name,
+                item=item,
+                source_label=source_label,
+                section_number=section_number,
+                page_number=page_number,
+            )
+        )
 
     for record in records:
         record_type = clean_text(_get(record, "record_type", ""))
@@ -2769,13 +3086,25 @@ def collect_manufacturing_info_occurrences(
                 and _text_contains_summary_code(text, summary_item.manufacturing_no)
             )
 
-            if not (context_match or code_match or (summary_context and stage_in_text)):
+            fraction_identity_item = None
+            if not code_match and _section_number_starts(record, "3.2.1"):
+                fraction_identity_item = _extract_fraction_occurrence_by_date_quantity(
+                    summary_item,
+                    text,
+                )
+
+            if not (
+                context_match
+                or code_match
+                or (summary_context and stage_in_text)
+                or fraction_identity_item is not None
+            ):
                 continue
 
             row_item = (
                 _extract_tabular_occurrence_by_code(summary_item, text)
                 if code_match
-                else None
+                else fraction_identity_item
             )
 
             scoped_item = None
@@ -2802,7 +3131,9 @@ def collect_manufacturing_info_occurrences(
 
             # 여러 단계가 한 레코드에 섞인 제조요약정보 표에서는 제조번호 행을
             # 우선하고, 단일 단계 정보 섹션에서는 단계 범위 추출을 우선한다.
-            if is_finished_product_application_info:
+            if fraction_identity_item is not None:
+                item = fraction_identity_item
+            elif is_finished_product_application_info:
                 item = _merge_occurrence_items(scoped_item, row_item, summary_item.stage_name)
             elif exact_context_match:
                 item = _merge_occurrence_items(scoped_item, row_item, summary_item.stage_name)
@@ -2837,6 +3168,35 @@ def collect_manufacturing_info_occurrences(
                     page_number=page_number,
                 )
             )
+
+    for summary_item in summary_items:
+        stage_key = _norm_match(summary_item.stage_name)
+
+        if out.get(stage_key) or not _should_use_summary_item_as_occurrence(summary_item):
+            continue
+
+        source_label = "제조요약정보"
+        dedupe_key = (
+            stage_key,
+            source_label,
+            _normalize_code(summary_item.manufacturing_no),
+            "-".join(_normalize_date_parts(summary_item.manufacturing_date)),
+            "|".join(_normalize_quantity(summary_item.quantity)),
+        )
+
+        if dedupe_key in seen:
+            continue
+
+        seen.add(dedupe_key)
+        out.setdefault(stage_key, []).append(
+            ManufacturingInfoOccurrence(
+                stage_name=summary_item.stage_name,
+                item=summary_item,
+                source_label=source_label,
+                section_number="1.3",
+                page_number=summary_item.page_number,
+            )
+        )
 
     return out
 
@@ -2985,6 +3345,59 @@ def _evaluation_context(evaluation: Any, record: Any | None) -> str:
     return " ".join(part for part in parts if part)
 
 
+def _is_albumin_records_source(records_source: Any, records: list[Any] | None = None) -> bool:
+    records = records if records is not None else _records_from_source(records_source)
+    fragments: list[str] = []
+    for record in records[:80]:
+        fragments.append(_join_record_text(record))
+        fragments.append(clean_text(_get(record, "title", "")))
+        fragments.append(clean_text(_get(record, "section_title", "")))
+    text = _norm_match(" ".join(fragments))
+    return bool(
+        ("동국알부민" in text or "humanserumalbumin" in text or "albumin" in text)
+        and ("원료혈장" in text or "원획분" in text)
+    )
+
+
+def _move_albumin_plasma_test_dates_to_first(
+    out: dict[str, list[TestDateCompareResult]],
+    summary_items: list[ManufacturingInfoItem],
+) -> None:
+    plasma_keys = [
+        _norm_match(item.stage_name)
+        for item in summary_items
+        if "원료혈장" in _norm_match(item.stage_name)
+    ]
+    plasma_keys = [key for key in plasma_keys if key]
+    if not plasma_keys:
+        return
+
+    target_key = _norm_match("원료혈장1")
+    if target_key not in out:
+        target_key = plasma_keys[0]
+
+    merged: list[TestDateCompareResult] = []
+    seen: set[tuple[str, str, str, str, str]] = set()
+    for key in plasma_keys:
+        for item in out.get(key, []):
+            signature = (
+                clean_text(item.test_name),
+                clean_text(item.date_text),
+                clean_text(item.status),
+                clean_text(item.section_number),
+                clean_text(str(item.page_number or "")),
+            )
+            if signature in seen:
+                continue
+            seen.add(signature)
+            merged.append(item)
+
+    for key in plasma_keys:
+        out[key] = []
+    out[target_key] = merged
+
+
+
 def validate_stage_test_date_ranges(
     records_source: Any,
     summary_items: list[ManufacturingInfoItem] | None = None,
@@ -3098,7 +3511,84 @@ def validate_stage_test_date_ranges(
                 )
             )
 
+    if _is_albumin_records_source(records_source, records):
+        _move_albumin_plasma_test_dates_to_first(out, summary_items)
+
     return out
+
+
+def _is_quantity_field(field_name: str) -> bool:
+    key = _norm_match(field_name)
+    return bool("제조량" in key or "제조수량" in key or "총제조수량" in key)
+
+
+def _should_compare_occurrence_quantity(
+    summary_item: ManufacturingInfoItem,
+    occurrence: ManufacturingInfoOccurrence,
+) -> bool:
+    """Return True only when an occurrence is a valid manufacturing-quantity source.
+
+    Some albumin sections contain usage amounts (사용량) or formula amounts (분량).
+    Those values are valid document data, but they are not 제조량 and should not be
+    compared against the manufacturing-summary quantity.
+    """
+    item = occurrence.item
+    field_key = _norm_match(item.quantity_field_name)
+    source_key = _norm_match(
+        " ".join(
+            [
+                occurrence.source_label,
+                occurrence.section_number,
+                getattr(item, "source_label", ""),
+            ]
+        )
+    )
+    stage_key = _norm_match(summary_item.stage_name)
+
+    usage_tokens = [
+        "사용량",
+        "분량",
+        "원료약품",
+        "사용단계참조",
+        "사용된원료혈장",
+        "사용된최종원액",
+    ]
+    if any(_norm_match(token) in field_key for token in usage_tokens):
+        return False
+    if any(_norm_match(token) in source_key for token in usage_tokens):
+        return False
+
+    # For albumin fractions, 4.x sections often describe downstream usage.
+    # Manufacturing quantity must come from the 원획분 detail section itself.
+    if _norm_match("원획분") in stage_key:
+        section = clean_text(occurrence.section_number)
+        label = clean_text(occurrence.source_label)
+        return section.startswith("3.2.1") or "3.2.1" in label
+
+    return True
+
+
+def _should_mark_missing_quantity_as_info(
+    summary_item: ManufacturingInfoItem,
+    stage_occurrences: list[ManufacturingInfoOccurrence],
+) -> bool:
+    stage_key = _norm_match(summary_item.stage_name)
+
+    if "원료혈장" not in stage_key:
+        return False
+
+    if not _has_numbered_stage_suffix(summary_item.stage_name):
+        return False
+
+    for occurrence in stage_occurrences:
+        if clean_text(occurrence.section_number) != "1.2":
+            continue
+        if occurrence.item.quantity:
+            continue
+        if occurrence.item.manufacturing_no or occurrence.item.manufacturing_date:
+            return True
+
+    return False
 
 
 def validate_manufacturing_info_consistency(
@@ -3152,6 +3642,8 @@ def validate_manufacturing_info_consistency(
                 # 들어 있는 표에서 존재하지 않는 열을 억지로 불합격 처리하지 않는다.
                 if not clean_text(document_value):
                     continue
+                if _is_quantity_field(field_name) and not _should_compare_occurrence_quantity(summary_item, occurrence):
+                    continue
                 result = _compare_field(field_name, summary_value, document_value)
                 result.source_label = occurrence.source_label
                 result.section_number = occurrence.section_number
@@ -3166,6 +3658,18 @@ def validate_manufacturing_info_consistency(
         compared_field_names = {field.field_name for field in field_results}
         for field_name, summary_value in required_fields:
             if not clean_text(summary_value) or field_name in compared_field_names:
+                continue
+            if _is_quantity_field(field_name) and _should_mark_missing_quantity_as_info(summary_item, stage_occurrences):
+                field_results.append(
+                    FieldCompareResult(
+                        field_name=field_name,
+                        summary_value=summary_value,
+                        document_value="제조요약정보에 제조량 미기재",
+                        status="합격",
+                        reason="제조량 정보 없음 - 1.2 제조요약정보에 제조번호와 제조년월일만 기재되어 수량 비교는 제외했습니다.",
+                        source_label="1.2 제조요약정보",
+                    )
+                )
                 continue
             field_results.append(
                 FieldCompareResult(
@@ -3240,7 +3744,7 @@ def render_manufacturing_info_validation_card(
     if not results:
         return """
         <div class="mfg-compact-card">
-            <h3 class="mfg-compact-title">제조정보 교차 검증</h3>
+            <h3 class="mfg-compact-title">정합성 검증-제조량, 제조일자, 제조번호 검증</h3>
             <p class="mfg-compact-desc">비교 가능한 제조요약도 데이터가 없습니다.</p>
         </div>
         """
@@ -3255,6 +3759,11 @@ def render_manufacturing_info_validation_card(
         stage_source_target = f"mfg-stage-{anchor}"
         validation_anchor = f"mfg-validation-{anchor}"
         issue_fields = [field for field in result.fields if field.status != "합격"]
+        info_fields = [
+            field
+            for field in result.fields
+            if field.status == "합격" and "정보 없음" in field.reason
+        ]
         issue_dates = [item for item in result.test_dates if item.status != "합격"]
         passed_checks += sum(field.status == "합격" for field in result.fields)
         passed_checks += sum(item.status == "합격" for item in result.test_dates)
@@ -3280,7 +3789,25 @@ def render_manufacturing_info_validation_card(
                     <div class="mfg-issue-kind">{html.escape(issue_kind)}</div>
                     <div class="mfg-issue-source">{html.escape(source)}</div>
                     <div class="mfg-issue-values">
-                        <span>기준 <b>{html.escape(field.summary_value or '-')}</b></span>
+                        <span>제조요약도 기준 <b>{html.escape(field.summary_value or '-')}</b></span>
+                        <span>본문 <b>{html.escape(field.document_value or '-')}</b></span>
+                    </div>
+                    <div class="mfg-issue-reason">{html.escape(field.reason)}</div>
+                </div>
+                """
+            )
+
+        for field in info_fields:
+            source = field.source_label or "문서 본문"
+            source_target = _section_anchor_id(field.section_number) or stage_source_target
+            scroll_attrs = _scroll_attrs(source_target, stage_source_target)
+            issue_rows.append(
+                f"""
+                <div class="mfg-issue-row info"{scroll_attrs}>
+                    <div class="mfg-issue-kind">{html.escape(field.field_name)} 정보 없음</div>
+                    <div class="mfg-issue-source">{html.escape(source)}</div>
+                    <div class="mfg-issue-values">
+                        <span>제조요약도 기준 <b>{html.escape(field.summary_value or '-')}</b></span>
                         <span>본문 <b>{html.escape(field.document_value or '-')}</b></span>
                     </div>
                     <div class="mfg-issue-reason">{html.escape(field.reason)}</div>
@@ -3316,7 +3843,7 @@ def render_manufacturing_info_validation_card(
                 """
             )
 
-        issue_count = len(issue_rows)
+        issue_count = len(issue_fields) + len(issue_dates)
         date_passes = sum(item.status == "합격" for item in result.test_dates)
         date_failures = sum(item.status == "불합격" for item in result.test_dates)
         date_holds = sum(item.status == "보류" for item in result.test_dates)
@@ -3458,6 +3985,8 @@ def render_manufacturing_info_validation_card(
         cursor: pointer;
     }}
     .mfg-issue-row.hold {{ border-color: #fde68a; }}
+    .mfg-issue-row.info {{ border-color: #bfdbfe; background: #f8fbff; }}
+    .mfg-issue-row.info .mfg-issue-kind {{ color: #1d4ed8; }}
     .mfg-issue-row:hover, .mfg-issue-row:focus-visible {{
         outline: 2px solid #93c5fd;
         outline-offset: 2px;
@@ -3478,7 +4007,7 @@ def render_manufacturing_info_validation_card(
     <div class="mfg-compact-card">
         <div class="mfg-compact-head">
             <div>
-                <h3 class="mfg-compact-title">제조정보 교차 검증</h3>
+                <h3 class="mfg-compact-title">정합성 검증-제조량, 제조일자, 제조번호 검증</h3>
                 <p class="mfg-compact-desc">
                     제조요약도 값을 문서 전체의 제조번호·제조년월일·제조량과 비교합니다.
                 </p>

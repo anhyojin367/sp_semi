@@ -524,6 +524,51 @@ def _record_text(record) -> str:
     )
 
 
+def _processing_result_text(result: ProcessingResult) -> str:
+    parts: list[str] = []
+    parts.append(clean_text(getattr(result, "product_name", "")))
+    records = list(getattr(result, "extracted_records", []) or []) or list(getattr(result, "records", []) or [])
+    for record in records:
+        parts.append(_record_text(record))
+    for evaluation in list(getattr(result, "evaluations", []) or []):
+        parts.append(_evaluation_text(evaluation))
+    return " ".join(part for part in parts if part)
+
+
+def _is_albumin_document(result: ProcessingResult) -> bool:
+    text = _norm_match(_processing_result_text(result))
+    return bool(
+        ("동국알부민" in text or "humanserumalbumin" in text or "albumin" in text)
+        and ("원료혈장" in text or "원획분" in text)
+    )
+
+
+def _is_albumin_plasma_test_section(evaluation: Evaluation) -> bool:
+    section_number = clean_text(getattr(evaluation, "section_number", ""))
+    return section_number == "2.2" or section_number.startswith("2.2.")
+
+
+def _albumin_stage_order() -> list[str]:
+    return [
+        "원료혈장1",
+        "원료혈장2",
+        "원료혈장3",
+        "원료혈장4",
+        "원료혈장5",
+        "원료혈장6",
+        "원획분1",
+        "최종원액",
+        "완제의약품",
+    ]
+
+
+def _zero_stage_export(stage_name: str, output_dir: Path) -> StageExportResult:
+    csv_path = output_dir / f"{_safe_filename(stage_name)}.csv"
+    if not csv_path.exists():
+        _write_csv(csv_path, [])
+    return StageExportResult(stage_name=stage_name, csv_path=csv_path, evaluations=[])
+
+
 def _stage_directly_matches_text(stage_name: str, text: str) -> bool:
     stage_key = _norm_match(stage_name)
     text_key = _norm_match(text)
@@ -614,6 +659,36 @@ def _find_evaluations_for_stage(
 ) -> list[Evaluation]:
     evaluations = list(getattr(result, "evaluations", []) or [])
 
+    if _is_albumin_document(result):
+        stage_key = _norm_match(stage_name)
+        if stage_key == _norm_match("원료혈장1"):
+            return sorted(
+                [ev for ev in evaluations if _is_albumin_plasma_test_section(ev)],
+                key=lambda x: getattr(x, "order_idx", 0),
+            )
+        if stage_key in {
+            _norm_match("원료혈장2"),
+            _norm_match("원료혈장3"),
+            _norm_match("원료혈장4"),
+            _norm_match("원료혈장5"),
+            _norm_match("원료혈장6"),
+        }:
+            return []
+        if stage_key == _norm_match("원획분1"):
+            fraction_matches = []
+            for ev in evaluations:
+                section_number = clean_text(getattr(ev, "section_number", ""))
+                text = _evaluation_text(ev)
+                if (
+                    section_number == "3"
+                    or section_number.startswith("3.")
+                    or _stage_directly_matches_text("원획분", text)
+                    or _stage_soft_matches_text("원획분", text)
+                ):
+                    fraction_matches.append(ev)
+            if fraction_matches:
+                return sorted(fraction_matches, key=lambda x: getattr(x, "order_idx", 0))
+
     matched: list[Evaluation] = []
     seen_order_idx: set[int] = set()
 
@@ -674,7 +749,13 @@ def export_stage_csvs(
 ) -> list[StageExportResult]:
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    stages = _extract_dynamic_stages(result)
+    if _is_albumin_document(result):
+        stages = [
+            DynamicStage(display_name=name, filename_stem=_safe_filename(name))
+            for name in _albumin_stage_order()
+        ]
+    else:
+        stages = _extract_dynamic_stages(result)
 
     export_results: list[StageExportResult] = []
     used_filenames: set[str] = set()
@@ -686,6 +767,14 @@ def export_stage_csvs(
         )
 
         if not matched_evaluations:
+            if _is_albumin_document(result) and _norm_match(stage.display_name) in {
+                _norm_match("원료혈장2"),
+                _norm_match("원료혈장3"),
+                _norm_match("원료혈장4"),
+                _norm_match("원료혈장5"),
+                _norm_match("원료혈장6"),
+            }:
+                export_results.append(_zero_stage_export(stage.display_name, output_dir))
             continue
 
         rows: list[dict[str, str]] = []

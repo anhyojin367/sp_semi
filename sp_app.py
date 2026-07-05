@@ -33,8 +33,8 @@ DEFAULT_GMAIL_SINCE = date(2026, 1, 1)
 GMAIL_CONFIRMATION_VERSION = "manual-gmail-confirm-20260602-v2"
 JUDGEMENT_STATUS_DIR = Path(__file__).resolve().parent / ".sp_judgement_status"
 JUDGEMENT_STATUS_INDEX = JUDGEMENT_STATUS_DIR / "status_index.json"
-APP_CACHE_VERSION = "sp-ui-cache-v55-20260630-unified-summary-counts"
-JUDGEMENT_STATUS_CACHE_VERSION = "sp-app-direct-bridge-v34-20260624-rag-data-unified-judge"
+APP_CACHE_VERSION = "sp-ui-cache-v82-20260705-manufacturing-quantity-only"
+JUDGEMENT_STATUS_CACHE_VERSION = "sp-app-direct-bridge-v48-20260703-remove-mfg-source-pages"
 
 
 def _ensure_current_cache_version() -> None:
@@ -46,6 +46,10 @@ def _ensure_current_cache_version() -> None:
         if str(key).startswith("sp_direct_judgement_artifacts::"):
             st.session_state.pop(key, None)
     st.session_state.pop("latest_judgement_artifact_key", None)
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
     st.session_state[session_key] = APP_CACHE_VERSION
 
 
@@ -513,7 +517,7 @@ EXPANDED_REFERENCE_LIBRARY: tuple[ReferenceDocument, ...] = (
 
 
 st.set_page_config(
-    page_title="SP문서 AI 자동검토 시스템",
+    page_title="SP 문서 AI 자동검토 시스템",
     page_icon="SP",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -523,6 +527,7 @@ st.set_page_config(
 def main() -> None:
     STORE_DIR.mkdir(parents=True, exist_ok=True)
     _ensure_current_cache_version()
+    _init_gmail_state()
 
     view = ""
     try:
@@ -535,7 +540,8 @@ def main() -> None:
         view = ""
 
     # 첫 화면은 한 화면 안에 맞추고, 긴 결과/문서 보기 화면은 스크롤을 허용한다.
-    _inject_styles(fit_first_page=(view not in {"judge_final", "pdf_viewer"}))
+    running_sim = bool(st.session_state.get("run_sim"))
+    _inject_styles(fit_first_page=(view not in {"judge_final", "pdf_viewer"} and not running_sim))
 
     if view == "pdf_viewer":
         _render_pdf_viewer_page()
@@ -550,7 +556,7 @@ def main() -> None:
     gate = _version_gate(selected_doc, refs)
 
     if view == "judge_final":
-        _render_topbar()
+        _render_topbar(show_gmail=False)
 
         query_pdf = ""
         try:
@@ -604,11 +610,11 @@ def main() -> None:
         )
         return
 
-    _render_topbar()
+    _render_topbar(show_gmail=not running_sim)
 
     # 검수 시뮬레이션 화면에서는 제출 문서함을 숨기고,
     # 플로우차트를 전체 폭으로 크게 보여준다.
-    if bool(st.session_state.get("run_sim")):
+    if running_sim:
         with st.container(border=True):
             _render_reference_panel(selected_doc, refs, gate)
         return
@@ -625,7 +631,7 @@ def main() -> None:
 
     _maybe_poll_gmail()
 
-SIMULATION_HEIGHT = 820
+SIMULATION_HEIGHT = 1120
 
 
 def _sim_signature(csv_dir: Path, pdf_path: Path | None, explicit_summary_path: Path | None = None) -> tuple:
@@ -802,7 +808,7 @@ def _render_inline_simulation(product: str, pdf_path: Path | None = None) -> flo
         permit_enabled=has_permit_pdf,
     )
 
-    components.html(html, height=SIMULATION_HEIGHT, scrolling=False)
+    components.html(html, height=SIMULATION_HEIGHT, scrolling=True)
     return _simulation_finish_delay_seconds(final_graph_json, has_permit_pdf)
 
 
@@ -922,13 +928,20 @@ def _maybe_poll_gmail() -> None:
         st.rerun()
 
 
-def _render_topbar() -> None:
+def _render_topbar(*, show_gmail: bool = True) -> None:
     _init_gmail_state()
+    if not show_gmail:
+        st.session_state["gmail_settings_open"] = False
     logo_strip = "".join(
         _organization_logo_html(name, domain)
         for name, domain in ORG_LOGO_DOMAINS.items()
     )
-    brand_col, gmail_col = st.columns([6.5, 1.1], gap="large", vertical_alignment="center")
+    if show_gmail:
+        brand_col, gmail_col = st.columns([6.5, 1.1], gap="large", vertical_alignment="center")
+    else:
+        brand_col = st.container()
+        gmail_col = None
+
     with brand_col:
         st.markdown(
             f"""
@@ -936,24 +949,25 @@ def _render_topbar() -> None:
               <div class="brand-wrap">
                 <div class="agency-logo-strip">{logo_strip}</div>
                 <div>
-                  <div class="brand-title">SP문서 AI 자동검토 시스템</div>
+                  <div class="brand-title">SP 문서 AI 자동검토 시스템</div>
                 </div>
               </div>
             </div>
             """,
             unsafe_allow_html=True,
         )
-    with gmail_col:
-        _render_gmail_toggle()
+    if gmail_col is not None:
+        with gmail_col:
+            _render_gmail_toggle()
 
-    if st.session_state.get("gmail_settings_open", False):
+    if show_gmail and st.session_state.get("gmail_settings_open", False):
         with st.container(border=True, key="gmail_floating_panel"):
             _render_gmail_settings_content(_gmail_connection_state())
 
 
 def _render_gmail_toggle() -> None:
     state = _gmail_connection_state()
-    label = "Gmail 연결됨" if state["state"] == "connected" else "Gmail 설정"
+    label = "정보 연계 설정"
     icon = "⌃" if st.session_state.get("gmail_settings_open", False) else "⌄"
     if st.button(f"{label} {icon}", key="gmail-settings-toggle", use_container_width=True):
         st.session_state["gmail_settings_open"] = not st.session_state.get("gmail_settings_open", False)
@@ -963,10 +977,13 @@ def _render_gmail_toggle() -> None:
 def _render_gmail_settings_content(state: dict[str, str]) -> None:
     st.markdown(_gmail_status_html(state), unsafe_allow_html=True)
     if st.button("연결 해제", key="gmail-disconnect", use_container_width=True, disabled=state["state"] == "offline"):
+        st.session_state["gmail_user_disconnected"] = True
         st.session_state["gmail_logged_in"] = False
         st.session_state["gmail_connected_address"] = ""
         st.session_state["gmail_app_password"] = ""
         st.session_state["gmail_confirm_version"] = ""
+        st.session_state["gmail_confirmed_address"] = ""
+        st.session_state["gmail_confirmed_app_password"] = ""
         st.session_state.pop("selected_pdf_path", None)
         st.session_state["last_gmail_sync_error"] = ""
         st.rerun()
@@ -974,15 +991,15 @@ def _render_gmail_settings_content(state: dict[str, str]) -> None:
     st.markdown(
         """
         <div class="setting-copy">
-          제목에 <b>[식약처]</b>가 포함된 메일을 감시하고, PDF 첨부파일을 왼쪽 SP 제출문서함에 자동 저장합니다.
+          sp문서와 허가서 정보가 있는 문서함에 연계합니다.
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    address = st.text_input("Gmail 주소", key="gmail_address", placeholder="example@gmail.com")
+    address = st.text_input("Mail 주소", key="gmail_address", placeholder="example@gmail.com")
     password = st.text_input(
-        "Gmail 앱 비밀번호",
+        "Mail 앱 비밀번호",
         key="gmail_app_password",
         type="password",
         placeholder="16자리 앱 비밀번호",
@@ -995,18 +1012,17 @@ def _render_gmail_settings_content(state: dict[str, str]) -> None:
         max_value=date(2035, 12, 31),
     )
 
-    if st.button("Gmail 확인", use_container_width=True):
+    if st.button("Mail 확인", use_container_width=True):
         config = _build_gmail_config(address, password, keyword, since_date)
         if config is None:
-            st.warning("Gmail 주소와 16자리 앱 비밀번호를 입력해야 합니다.")
+            st.warning("Mail 주소와 16자리 앱 비밀번호를 입력해야 합니다.")
         else:
-            _save_gmail_state(address, password, keyword, since_date)
             result = _sync_gmail(config, show_result=False)
             if result.get("ok"):
                 st.session_state["gmail_settings_open"] = False
                 st.rerun()
             else:
-                st.warning(result.get("error") or "Gmail 확인 중 오류가 발생했습니다.")
+                st.warning(result.get("error") or "Mail 확인 중 오류가 발생했습니다.")
 
 
 def _render_gmail_panel() -> None:
@@ -1017,21 +1033,24 @@ def _render_gmail_panel() -> None:
         st.markdown(_gmail_status_html(state), unsafe_allow_html=True)
     with btn_col:
         if st.button("연결 해제", use_container_width=True, disabled=state["state"] == "offline"):
+            st.session_state["gmail_user_disconnected"] = True
             st.session_state["gmail_logged_in"] = False
             st.session_state["gmail_connected_address"] = ""
             st.session_state["gmail_app_password"] = ""
             st.session_state["gmail_confirm_version"] = ""
+            st.session_state["gmail_confirmed_address"] = ""
+            st.session_state["gmail_confirmed_app_password"] = ""
             st.session_state.pop("selected_pdf_path", None)
             st.session_state["last_gmail_sync_error"] = ""
             st.rerun()
 
     expanded = state["state"] != "connected"
 
-    with st.expander("Gmail 로그인 및 자동 수신 설정", expanded=expanded):
+    with st.expander("Mail 로그인 및 자동 수신 설정", expanded=expanded):
         st.markdown(
             """
             <div class="setting-copy">
-              제목에 <b>[식약처]</b>가 포함된 메일을 감시하고, PDF 첨부파일을 왼쪽 SP 제출문서함에 자동 저장합니다.
+              sp문서와 허가서 정보가 있는 문서함에 연계합니다.
             </div>
             """,
             unsafe_allow_html=True,
@@ -1039,10 +1058,10 @@ def _render_gmail_panel() -> None:
 
         col1, col2, col3, col4, col5 = st.columns([1.25, 1.25, .9, .85, .7], gap="medium")
         with col1:
-            address = st.text_input("Gmail 주소", key="gmail_address", placeholder="example@gmail.com")
+            address = st.text_input("Mail 주소", key="gmail_address", placeholder="example@gmail.com")
         with col2:
             password = st.text_input(
-                "Gmail 앱 비밀번호",
+                "Mail 앱 비밀번호",
                 key="gmail_app_password",
                 type="password",
                 placeholder="16자리 앱 비밀번호",
@@ -1061,12 +1080,11 @@ def _render_gmail_panel() -> None:
             )
         with col5:
             st.markdown("<div class='button-spacer'></div>", unsafe_allow_html=True)
-            if st.button("Gmail 확인", use_container_width=True):
+            if st.button("Mail 확인", use_container_width=True):
                 config = _build_gmail_config(address, password, keyword, since_date)
                 if config is None:
-                    st.warning("Gmail 주소와 16자리 앱 비밀번호를 입력해야 합니다.")
+                    st.warning("Mail 주소와 16자리 앱 비밀번호를 입력해야 합니다.")
                 else:
-                    _save_gmail_state(address, password, keyword, since_date)
                     _sync_gmail(config, show_result=True)
         status = _last_sync_status()
         current_store_dir = _current_gmail_store_dir() or STORE_DIR
@@ -1083,20 +1101,89 @@ def _render_gmail_panel() -> None:
         )
 
 
+def _local_gmail_defaults() -> dict[str, object]:
+    try:
+        gmail = dict(st.secrets.get("gmail", {}))
+    except Exception:
+        gmail = {}
+    if not gmail:
+        secrets_path = Path(__file__).resolve().parent / ".streamlit" / "secrets.toml"
+        if secrets_path.exists():
+            current_section = ""
+            parsed: dict[str, str] = {}
+            try:
+                for raw_line in secrets_path.read_text(encoding="utf-8-sig").splitlines():
+                    line = raw_line.strip().lstrip("\ufeff")
+                    if not line or line.startswith("#"):
+                        continue
+                    if line.startswith("[") and line.endswith("]"):
+                        current_section = line.strip("[]").strip()
+                        continue
+                    if current_section == "gmail" and "=" in line:
+                        key, value = line.split("=", 1)
+                        parsed[key.strip()] = value.strip().strip('"').strip("'")
+            except Exception:
+                parsed = {}
+            gmail = parsed
+    address = str(gmail.get("address", "") or "").strip()
+    password = str(gmail.get("app_password", "") or "").strip()
+    keyword = str(gmail.get("subject_keyword", DEFAULT_SUBJECT_KEYWORD) or DEFAULT_SUBJECT_KEYWORD).strip()
+    since_raw = gmail.get("since_date", DEFAULT_GMAIL_SINCE)
+    since_date = DEFAULT_GMAIL_SINCE
+    if isinstance(since_raw, datetime):
+        since_date = since_raw.date()
+    elif isinstance(since_raw, date):
+        since_date = since_raw
+    else:
+        try:
+            since_date = date.fromisoformat(str(since_raw))
+        except ValueError:
+            since_date = DEFAULT_GMAIL_SINCE
+    return {
+        "address": address,
+        "app_password": password.replace(" ", ""),
+        "subject_keyword": keyword or DEFAULT_SUBJECT_KEYWORD,
+        "since_date": since_date,
+        "search": _imap_since_term(since_date),
+    }
+
+
 def _init_gmail_state() -> None:
-    st.session_state.setdefault("gmail_address", "")
-    st.session_state.setdefault("gmail_app_password", "")
-    st.session_state.setdefault("gmail_subject_keyword", DEFAULT_SUBJECT_KEYWORD)
-    st.session_state.setdefault("gmail_since_date", DEFAULT_GMAIL_SINCE)
+    defaults = _local_gmail_defaults()
+    default_address = str(defaults.get("address", "") or "")
+    default_password = str(defaults.get("app_password", "") or "")
+    default_keyword = str(defaults.get("subject_keyword", DEFAULT_SUBJECT_KEYWORD) or DEFAULT_SUBJECT_KEYWORD)
+    default_since = defaults.get("since_date") if isinstance(defaults.get("since_date"), date) else DEFAULT_GMAIL_SINCE
+    default_search = str(defaults.get("search", "") or _imap_since_term(default_since))
+
+    st.session_state.setdefault("gmail_user_disconnected", False)
+    st.session_state.setdefault("gmail_address", default_address)
+    st.session_state.setdefault("gmail_app_password", default_password)
+    st.session_state.setdefault("gmail_subject_keyword", default_keyword)
+    st.session_state.setdefault("gmail_since_date", default_since)
     st.session_state.setdefault("gmail_logged_in", False)
     st.session_state.setdefault("gmail_connected_address", "")
     st.session_state.setdefault("gmail_confirm_version", "")
-    st.session_state.setdefault("gmail_confirmed_address", "")
-    st.session_state.setdefault("gmail_confirmed_app_password", "")
-    st.session_state.setdefault("gmail_confirmed_subject_keyword", DEFAULT_SUBJECT_KEYWORD)
-    st.session_state.setdefault("gmail_confirmed_since_date", DEFAULT_GMAIL_SINCE)
-    st.session_state.setdefault("gmail_confirmed_search", "")
+    st.session_state.setdefault("gmail_confirmed_address", default_address)
+    st.session_state.setdefault("gmail_confirmed_app_password", default_password)
+    st.session_state.setdefault("gmail_confirmed_subject_keyword", default_keyword)
+    st.session_state.setdefault("gmail_confirmed_since_date", default_since)
+    st.session_state.setdefault("gmail_confirmed_search", default_search)
     st.session_state.setdefault("gmail_settings_open", False)
+    if default_address and default_password:
+        st.session_state["gmail_user_disconnected"] = False
+        st.session_state["gmail_address"] = default_address
+        st.session_state["gmail_app_password"] = default_password
+        st.session_state["gmail_subject_keyword"] = default_keyword
+        st.session_state["gmail_since_date"] = default_since
+        st.session_state["gmail_logged_in"] = True
+        st.session_state["gmail_connected_address"] = default_address
+        st.session_state["gmail_confirm_version"] = GMAIL_CONFIRMATION_VERSION
+        st.session_state["gmail_confirmed_address"] = default_address
+        st.session_state["gmail_confirmed_app_password"] = default_password
+        st.session_state["gmail_confirmed_subject_keyword"] = default_keyword
+        st.session_state["gmail_confirmed_since_date"] = default_since
+        st.session_state["gmail_confirmed_search"] = default_search
 
 
 def _gmail_connection_state() -> dict[str, str]:
@@ -1105,28 +1192,28 @@ def _gmail_connection_state() -> dict[str, str]:
         st.session_state.get("gmail_connected_address")
         or st.session_state.get("gmail_address", "")
     ).strip()
-    if _gmail_session_confirmed() and not error:
+    if _gmail_session_confirmed():
         return {
             "state": "connected",
-            "title": "Gmail 연결됨",
-            "detail": f"{address or '계정'} · 마지막 확인 {_last_sync_status()} · {_gmail_confirmed_since_date().strftime('%Y.%m.%d')} 이후 메일",
+            "title": "Mail 연결됨",
+            "detail": "",
         }
     if error:
         return {
             "state": "error",
-            "title": "Gmail 연결 확인 필요",
+            "title": "Mail 연결 확인 필요",
             "detail": error,
         }
     if address or st.session_state.get("gmail_app_password"):
         return {
             "state": "pending",
-            "title": "Gmail 연결 확인 필요",
-            "detail": "Gmail 확인 버튼으로 연결 상태를 확인하세요.",
+            "title": "Mail 연결 확인 필요",
+            "detail": "Mail 확인 버튼으로 연결 상태를 확인하세요.",
         }
     return {
         "state": "offline",
-        "title": "Gmail 연결 안 됨",
-        "detail": "Gmail 주소와 앱 비밀번호를 입력해야 자동 수신이 시작됩니다.",
+        "title": "Mail 연결 안 됨",
+        "detail": "Mail 주소와 앱 비밀번호를 입력해야 자동 수신이 시작됩니다.",
     }
 
 
@@ -1238,7 +1325,7 @@ def _sync_gmail(config: GmailConfig, *, show_result: bool, show_spinner: bool = 
 
     store_dir = _gmail_account_store_dir(config.address)
     if show_spinner:
-        with st.spinner("Gmail 수신함 확인 중"):
+        with st.spinner("Mail 수신함 확인 중"):
             result = download_gmail_sp_pdfs(store_dir, config=config)
     else:
         result = download_gmail_sp_pdfs(store_dir, config=config)
@@ -1249,6 +1336,7 @@ def _sync_gmail(config: GmailConfig, *, show_result: bool, show_spinner: bool = 
     if result.get("ok"):
         st.session_state["last_gmail_sync_error"] = ""
         st.session_state["last_gmail_background_error"] = ""
+        st.session_state["gmail_user_disconnected"] = False
         st.session_state["gmail_logged_in"] = True
         st.session_state["gmail_connected_address"] = config.address
         st.session_state["gmail_confirm_version"] = GMAIL_CONFIRMATION_VERSION
@@ -1258,7 +1346,14 @@ def _sync_gmail(config: GmailConfig, *, show_result: bool, show_spinner: bool = 
         st.session_state["gmail_confirmed_search"] = config.search
         st.session_state["gmail_confirmed_since_date"] = _gmail_since_date()
     else:
-        if show_result or not had_confirmed or confirmed_address != config.address:
+        if had_confirmed:
+            st.session_state["last_gmail_background_error"] = result.get("error") or ""
+            st.session_state["last_gmail_sync_error"] = ""
+            st.session_state["gmail_logged_in"] = True
+            st.session_state["gmail_confirm_version"] = GMAIL_CONFIRMATION_VERSION
+            if confirmed_address:
+                st.session_state["gmail_connected_address"] = confirmed_address
+        elif show_result or confirmed_address != config.address:
             st.session_state["last_gmail_sync_error"] = result.get("error") or ""
             st.session_state["gmail_logged_in"] = False
             st.session_state["gmail_connected_address"] = ""
@@ -1274,7 +1369,7 @@ def _sync_gmail(config: GmailConfig, *, show_result: bool, show_spinner: bool = 
             st.success(f"조건 일치 메일 {matched}건, 새 PDF {downloaded}개를 확인했습니다.")
             st.rerun()
         else:
-            st.warning(result.get("error") or "Gmail 확인 중 오류가 발생했습니다.")
+            st.warning(result.get("error") or "Mail 확인 중 오류가 발생했습니다.")
 
     return result
 
@@ -1630,8 +1725,8 @@ def _review_summary_html(status: dict) -> str:
     total = _safe_int(summary.get("total", 0))
     return (
         '<div class="doc-review-summary">'
-        f'<div><span class="dot pass"></span><span>합격</span><b>{passed}건</b></div>'
-        f'<div><span class="dot fail"></span><span>불합격</span><b>{failed}건</b></div>'
+        f'<div><span class="dot pass"></span><span>충족</span><b>{passed}건</b></div>'
+        f'<div><span class="dot fail"></span><span>불충족</span><b>{failed}건</b></div>'
         f'<div><span class="dot hold"></span><span>보류</span><b>{held}건</b></div>'
         f'<div class="total"><span>전체</span><b>{total}건</b></div>'
         '</div>'
@@ -1965,7 +2060,7 @@ def _delete_inbox_document(doc: InboxDocument) -> None:
                     index["sha256"].pop(key, None)
             index_path.write_text(json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8")
         except Exception as exc:
-            st.warning(f"Gmail 인덱스 정리 중 오류가 있었습니다: {exc}")
+            st.warning(f"Mail 인덱스 정리 중 오류가 있었습니다: {exc}")
 
     try:
         doc.path.unlink(missing_ok=True)
@@ -2085,7 +2180,7 @@ def _render_workflow_gate(
           <div class="workflow-node">
             <div class="node-icon">01</div>
             <div>
-              <b>Gmail SP 접수</b>
+              <b>Mail SP 접수</b>
               <span>메일 제목 필터 기반 PDF 자동 저장</span>
             </div>
           </div>
@@ -2134,7 +2229,7 @@ def _render_inbox_panel(documents: list[InboxDocument], selected_doc: InboxDocum
             """
             <div class="empty-card">
               <b>아직 수신된 PDF가 없습니다.</b>
-              <span>Gmail 설정을 열고 [식약처] 제목의 PDF 첨부 메일을 보내면 이 영역에 자동으로 표시됩니다.</span>
+              <span>Mail 설정을 열고 [식약처] 제목의 PDF 첨부 메일을 보내면 이 영역에 자동으로 표시됩니다.</span>
             </div>
             """,
             unsafe_allow_html=True,
@@ -2401,7 +2496,7 @@ def _render_review_workspace(
             st.markdown('<div class="pdf-canvas"><div class="pdf-empty">PDF 미리보기를 준비할 수 없습니다.<br>다운로드한 원본 파일에서 확인해 주세요.</div></div>', unsafe_allow_html=True)
 
     with right:
-        st.markdown('<div class="review-panel"><h2>제조요약도 검수 결과</h2><div class="summary-box"><h3>전체 요약</h3><div class="summary-metrics"><div class="metric-pass"><span>● 합격</span><b>65</b></div><div class="metric-fail"><span>● 불일치</span><b>21</b></div><div class="metric-hold"><span>● 보류</span><b>9</b></div><div><span>전체 항목</span><b>95</b></div></div></div><div class="issue-guide"><b>▲ 불일치 항목 있음</b>아래 항목을 누르면 PDF의 해당 위치를 표시합니다.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="review-panel"><h2>제조요약도 검수 결과</h2><div class="summary-box"><h3>전체 요약</h3><div class="summary-metrics"><div class="metric-pass"><span>● 충족</span><b>65</b></div><div class="metric-fail"><span>● 불충족</span><b>21</b></div><div class="metric-hold"><span>● 보류</span><b>9</b></div><div><span>전체 항목</span><b>95</b></div></div></div><div class="issue-guide"><b>▲ 불일치 항목 있음</b>아래 항목을 누르면 PDF의 해당 위치를 표시합니다.</div>', unsafe_allow_html=True)
         for idx, issue in enumerate(issues):
             label = f'{issue["title"]}  ·  {issue["count"]}건'
             if st.button(label, key=f"review-issue-{idx}", use_container_width=True):
@@ -3170,42 +3265,65 @@ def _inject_styles(fit_first_page: bool = True) -> None:
         }
 
         /* 검수 시뮬레이션은 단독 전체 폭/큰 화면으로 표시 */
+        html:has(.simulation-fullscreen-marker),
+        body:has(.simulation-fullscreen-marker),
+        [data-testid="stAppViewContainer"]:has(.simulation-fullscreen-marker),
+        [data-testid="stAppViewContainer"]:has(.simulation-fullscreen-marker) > .main,
+        section.main:has(.simulation-fullscreen-marker),
+        .main .block-container:has(.simulation-fullscreen-marker),
+        .block-container:has(.simulation-fullscreen-marker) {
+            height: auto !important;
+            max-height: none !important;
+            min-height: 100vh !important;
+            overflow-y: auto !important;
+        }
+        .block-container:has(.simulation-fullscreen-marker) {
+            padding-top: .55rem !important;
+            padding-bottom: 1.15rem !important;
+        }
         div[data-testid="stVerticalBlockBorderWrapper"]:has(.simulation-fullscreen-marker) {
-            height: calc(100vh - 116px) !important;
-            max-height: calc(100vh - 116px) !important;
-            overflow: hidden !important;
-            margin-bottom: .55rem !important;
+            height: auto !important;
+            max-height: none !important;
+            overflow: visible !important;
+            margin-bottom: .45rem !important;
             border-bottom-color: rgba(126, 137, 140, .74) !important;
         }
         div[data-testid="stVerticalBlockBorderWrapper"]:has(.simulation-fullscreen-marker) > div {
-            height: 100% !important;
-            padding: 1.1rem 1.3rem 1.05rem !important;
-            overflow: hidden !important;
+            height: auto !important;
+            padding: .65rem .9rem .75rem !important;
+            overflow: visible !important;
         }
         div[data-testid="stVerticalBlockBorderWrapper"]:has(.simulation-fullscreen-marker) iframe {
             width: 100% !important;
-            min-height: 820px !important;
+            min-height: 1120px !important;
             border-radius: 16px !important;
         }
         .simulation-title-row {
-            margin-bottom: .45rem !important;
+            min-height: 64px !important;
+            margin: -.15rem 0 .42rem !important;
+            padding: .62rem 1rem !important;
         }
         .simulation-title-row h2 {
-            font-size: 1.82rem !important;
+            font-size: 1.46rem !important;
+            line-height: 1.15 !important;
         }
         .simulation-title-row p {
-            font-size: 1.16rem !important;
+            font-size: .98rem !important;
+            line-height: 1.22 !important;
             color: #c7d0d2 !important;
         }
 
-        /* 상단바 높이 축소 */
+        /* 상단 브랜드 박스 안쪽 중앙 정렬 */
         div[data-testid="stHorizontalBlock"]:has(.topbar-brand-block) {
-            min-height: 82px !important;
-            margin: 0 -.95rem .7rem !important;
-            padding: 0 .95rem !important;
+            min-height: 88px !important;
+            margin: 1.05rem 0 .9rem !important;
+            padding: 0 1.1rem !important;
+            align-items: center !important;
+            overflow: hidden !important;
         }
         .topbar-brand-block {
-            min-height: 82px !important;
+            min-height: 88px !important;
+            align-items: center !important;
         }
         .agency-logo {
             width: 104px !important;
@@ -3449,17 +3567,18 @@ def _inject_styles(fit_first_page: bool = True) -> None:
             box-shadow: none;
         }
         div[data-testid="stHorizontalBlock"]:has(.topbar-brand-block) {
-            min-height: 108px;
-            margin: 0 -1.35rem 1.1rem;
-            padding: 0 1.35rem;
+            min-height: 88px;
+            margin: 1.05rem 0 1rem;
+            padding: 0 1.1rem;
             align-items: center;
             border-bottom: 1px solid #4d5354;
             background: var(--top);
+            overflow: hidden;
         }
         .topbar-brand-block {
             display: flex;
             align-items: center;
-            min-height: 108px;
+            min-height: 88px;
         }
         .brand-wrap {
             display: flex;
@@ -3776,7 +3895,7 @@ def _inject_styles(fit_first_page: bool = True) -> None:
         .st-key-gmail-settings-toggle {
             position: relative !important;
             min-height: 3rem !important;
-            margin-top: .45rem !important;
+            margin-top: 0 !important;
         }
         .st-key-gmail-settings-toggle div[data-testid="stButton"] {
             position: absolute !important;
@@ -4359,10 +4478,10 @@ def _inject_styles(fit_first_page: bool = True) -> None:
             border-color:#c8d9ec !important;
             box-shadow:0 12px 30px rgba(15,58,122,.10) !important;
         }
-        .simulation-title-row { position:relative; overflow:hidden; align-items:center !important; min-height:86px; margin:0 0 .65rem !important; padding:1rem 1.25rem !important; border:1px solid #164986 !important; border-radius:16px; background:linear-gradient(112deg,#051f4b 0%,#0a4e9d 62%,#147bd9 100%); box-shadow:0 12px 24px rgba(10,62,139,.24); }
-        .simulation-title-row:after { content:""; position:absolute; right:-45px; top:-115px; width:245px; height:245px; border:38px solid rgba(255,255,255,.11); border-radius:50%; }
-        .simulation-title-row h2 { position:relative; z-index:1; color:#ffffff !important; letter-spacing:-.03em; text-shadow:0 2px 10px rgba(0,0,0,.18); }
-        .simulation-title-row p { position:relative; z-index:1; color:#bfe1ff !important; font-weight:700; }
+        .simulation-title-row { position:relative; overflow:hidden; align-items:center !important; min-height:64px !important; margin:-.15rem 0 .42rem !important; padding:.62rem 1rem !important; border:1px solid #164986 !important; border-radius:14px; background:linear-gradient(112deg,#051f4b 0%,#0a4e9d 62%,#147bd9 100%); box-shadow:0 8px 18px rgba(10,62,139,.20); }
+        .simulation-title-row:after { content:""; position:absolute; right:-38px; top:-88px; width:178px; height:178px; border:28px solid rgba(255,255,255,.10); border-radius:50%; }
+        .simulation-title-row h2 { position:relative; z-index:1; color:#ffffff !important; font-size:1.46rem !important; line-height:1.15 !important; letter-spacing:0; text-shadow:0 2px 10px rgba(0,0,0,.18); }
+        .simulation-title-row p { position:relative; z-index:1; color:#bfe1ff !important; font-size:.98rem !important; line-height:1.22 !important; font-weight:700; }
         div[data-testid="stVerticalBlockBorderWrapper"]:has(.simulation-fullscreen-marker) iframe {
             border:2px solid #173f75 !important;
             box-shadow:0 14px 30px rgba(5,25,57,.26), 0 0 0 4px rgba(36,121,220,.10) !important;
@@ -4387,6 +4506,40 @@ def _inject_styles(fit_first_page: bool = True) -> None:
                 display: none;
             }
         }
+        div[data-testid="stHorizontalBlock"]:has(.topbar-brand-block) {
+            min-height: 88px !important;
+            margin: 1.05rem 0 .95rem !important;
+            padding: 0 1.1rem !important;
+            align-items: center !important;
+            border: 1px solid #dbe3ea !important;
+            border-radius: 14px !important;
+            background: #ffffff !important;
+            box-shadow: 0 8px 24px rgba(15,23,42,.08) !important;
+            overflow: hidden !important;
+        }
+        .topbar-brand-block {
+            display: flex !important;
+            align-items: center !important;
+            min-height: 88px !important;
+            transform: translateY(-4px) !important;
+        }
+        .brand-wrap {
+            display: flex !important;
+            align-items: center !important;
+            gap: .75rem !important;
+            transform: none !important;
+        }
+        .agency-logo-strip {
+            display: flex !important;
+            align-items: center !important;
+            gap: .55rem !important;
+        }
+        .agency-logo {
+            width: 104px !important;
+            height: 52px !important;
+            border-radius: 10px !important;
+            box-shadow: 0 5px 14px rgba(15,23,42,.08) !important;
+        }
         .topbar-brand-block .brand-title,
         .brand-title {
             color:#0b2f66 !important;
@@ -4394,10 +4547,10 @@ def _inject_styles(fit_first_page: bool = True) -> None:
             display:inline-flex !important;
             align-items:center !important;
             min-height:2.75rem !important;
-            padding:.18rem .72rem !important;
-            border-radius:12px !important;
-            background:rgba(255,255,255,.92) !important;
-            box-shadow:0 6px 18px rgba(15,23,42,.08) !important;
+            padding:0 !important;
+            border-radius:0 !important;
+            background:transparent !important;
+            box-shadow:none !important;
         }
         __FIRST_PAGE_FIT_CSS__
         </style>

@@ -300,41 +300,79 @@ def classify_table(table: ParsedTable) -> TableKind:
     return "supporting_table"
 
 
+def _clean_transposed_cell(value: Any) -> str:
+    text = clean_cell(value)
+    text = re.sub(r"Anti-HIV\s*\n\s*1/2", "Anti-HIV 1/2", text, flags=re.I)
+    text = re.sub(r"Cobas\s*\n\s*TaqScreen", "Cobas TaqScreen", text, flags=re.I)
+    text = text.replace("핵산증폭검\n사", "핵산증폭검사")
+    text = text.replace("사용된\n진단제제\n제조사", "사용된 진단제제 제조사")
+    text = text.replace("사용된\n진단제제명", "사용된 진단제제명")
+    return text
+
+
+def _looks_like_generic_table_columns(columns: list[str]) -> bool:
+    if not columns:
+        return False
+    generic_count = sum(1 for col in columns if re.fullmatch(r"열\s*\d+", clean_cell(col)))
+    return generic_count >= max(2, len(columns) // 2)
+
+
+def _looks_like_transposed_test_header(row: list[str]) -> bool:
+    if len(row) < 3:
+        return False
+    joined = " ".join(clean_cell(cell) for cell in row[1:] if clean_cell(cell))
+    compact = compact_text(joined)
+    tokens = ["anti-hiv", "anti-hcv", "hbsag", "hivrna", "hcvrna", "hbvdna"]
+    return sum(1 for token in tokens if token in compact) >= 2
+
+
 def transpose_result_table_to_rowwise(table: ParsedTable) -> ParsedTable:
     """
-    전치형 결과표를 행 기준 시험표로 바꾼다.
+    전치된 결과표를 행 기준 시험표로 바꾼다.
     """
     original_columns = table.columns
     original_rows = table.rows
 
-    if original_columns and compact_text(original_columns[0]) in {"", "항목", "구분"}:
+    if (
+        _looks_like_generic_table_columns(original_columns)
+        and original_rows
+        and _looks_like_transposed_test_header(original_rows[0])
+    ):
+        header_row = [_clean_transposed_cell(v) for v in original_rows[0]]
+        test_names = header_row[1:]
+        value_offset = 1
+        data_rows = original_rows[1:]
+    elif original_columns and compact_text(original_columns[0]) in {"", "항목", "구분"}:
         test_names = original_columns[1:]
         value_offset = 1
+        data_rows = original_rows
     else:
         test_names = original_columns
         value_offset = 0
+        data_rows = original_rows
 
     row_map: dict[str, list[str]] = {}
 
-    for row in original_rows:
+    for row in data_rows:
         if not row:
             continue
 
-        label = clean_cell(row[0])
+        label = _clean_transposed_cell(row[0])
         if not label:
             continue
 
-        row_map[label] = [clean_cell(v) for v in row[value_offset:]]
+        row_map[label] = [_clean_transposed_cell(v) for v in row[value_offset:]]
 
     field_labels = list(row_map.keys())
     output_columns = ["시험명"] + field_labels
     output_rows: list[list[str]] = []
 
     for idx, test_name in enumerate(test_names):
-        if not clean_cell(test_name):
+        test_name = _clean_transposed_cell(test_name)
+        if not test_name:
             continue
 
-        output_row = [clean_cell(test_name)]
+        output_row = [test_name]
         for label in field_labels:
             values = row_map.get(label, [])
             output_row.append(values[idx] if idx < len(values) else "")
@@ -349,8 +387,6 @@ def transpose_result_table_to_rowwise(table: ParsedTable) -> ParsedTable:
         confidence=min(table.confidence, 0.85),
     )
     return parsed
-
-
 def normalize_for_display(table: ParsedTable) -> ParsedTable:
     if table.kind == "multi_test_result_table" and looks_transposed_result_table(table):
         return transpose_result_table_to_rowwise(table)

@@ -450,19 +450,42 @@ def build_graph_from_flowchart(
     return graph
 
 
+def _has_branch_or_merge(graph: ManufacturingGraph) -> bool:
+    parents: dict[str, int] = defaultdict(int)
+    children: dict[str, int] = defaultdict(int)
+    for edge in graph.edges:
+        children[edge.source] += 1
+        parents[edge.target] += 1
+    return any(v > 1 for v in parents.values()) or any(v > 1 for v in children.values())
+
+
+def _should_use_pdf_flowchart(csv_graph: ManufacturingGraph, pdf_graph: ManufacturingGraph) -> bool:
+    """Use the PDF diagram when it carries a better real flow structure.
+
+    CSV files are still useful for counts/test details, but their edges are inferred
+    from stage names. For products with merge flows, the PDF diagram is the source of
+    truth because it preserves the actual arrows drawn in the manufacturing summary.
+    """
+    if not pdf_graph.nodes or not pdf_graph.edges:
+        return False
+    if not csv_graph.nodes:
+        return True
+    if _has_branch_or_merge(pdf_graph) and not _has_branch_or_merge(csv_graph):
+        return True
+    if len(pdf_graph.nodes) >= len(csv_graph.nodes) and len(pdf_graph.edges) >= len(csv_graph.edges):
+        return True
+    return False
+
+
 def load_simulation_graph(
     csv_dir: Path,
     pdf_path: Path | None = None,
     explicit_summary_path: Path | None = None,
 ) -> tuple[ManufacturingGraph, dict[str, dict[str, int]]]:
-    """검수 시뮬레이션용 그래프를 로드한다.
+    """Load the simulation graph and final summary counts.
 
-    - 구조(노드/연결): pdf_path 가 주어지면 extractor_codex 로 PDF의 실제 제조 요약도를
-      그대로 사용한다. 실패하거나 PDF 가 없으면 CSV 이름 추론으로 폴백.
-    - 카운트: explicit_summary_path 가 주어지면 그 파일을 직접 사용한다.
-      없으면 판정 완료 후 생성된 summary_after.csv를 우선 사용하고,
-      없으면 summary.csv를 사용한다.
-    반환: (최종 summary 그래프, {제조명: 최종 summary 카운트})
+    Counts come from summary_after.csv/summary.csv. Flow structure comes from CSV
+    inference by default, but a valid PDF flowchart with richer real arrows wins.
     """
     csv_dir = Path(csv_dir)
     if explicit_summary_path is not None and Path(explicit_summary_path).exists():
@@ -472,19 +495,17 @@ def load_simulation_graph(
     summary_counts = _read_summary_counts(summary_path) if summary_path else {}
 
     product_name = csv_dir.name.replace("_제조요약도_csv", "").replace("_csv", "")
-    # Prefer the curated manufacturing-summary CSV. The PDF flowchart extractor
-    # can return partial graphs on table-heavy pages, which breaks the simulation.
     graph = load_from_csv_directory(csv_dir, summary_path=summary_path)
 
-    if not graph.nodes and pdf_path:
+    if pdf_path:
         fc = extract_pdf_flowchart(Path(pdf_path))
         if fc:
             node_names, edge_pairs = fc
-            graph = build_graph_from_flowchart(product_name, node_names, edge_pairs, summary_counts)
+            pdf_graph = build_graph_from_flowchart(product_name, node_names, edge_pairs, summary_counts)
+            if _should_use_pdf_flowchart(graph, pdf_graph):
+                graph = pdf_graph
 
     return graph, summary_counts
-
-
 def _after_lookup(after: dict[str, dict[str, int]]) -> dict[str, dict[str, int]]:
     return {_normalize(k): v for k, v in after.items()}
 

@@ -19,7 +19,12 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from sp_pdf_judger.pipeline import DocumentJudgePipeline
-from sp_pdf_judger.stage_csv_exporter import make_stage_csv_zip
+from sp_pdf_judger.stage_csv_exporter import (
+    _is_albumin_document,
+    _write_export_summary_csv,
+    export_stage_csvs,
+    make_stage_csv_zip,
+)
 from sp_pdf_judger.manufacturing_stage_ui import (
     build_stage_info_cards,
     render_manufacturing_summary_with_stage_cards,
@@ -27,6 +32,7 @@ from sp_pdf_judger.manufacturing_stage_ui import (
 )
 from sp_pdf_judger.schemas import Summary
 from sp_pdf_judger.ui_html import (
+    _render_section1_pdf_pages,
     render_result_html,
     render_summary_card,
 )
@@ -36,7 +42,7 @@ JUDGE_COMPONENT_HEIGHT = 10000
 FINAL_JUDGEMENT_VIEWPORT_HEIGHT = 860
 JUDGEMENT_STATUS_DIR = Path(__file__).resolve().parent / ".sp_judgement_status"
 JUDGEMENT_STATUS_INDEX = JUDGEMENT_STATUS_DIR / "status_index.json"
-JUDGEMENT_CACHE_VERSION = "sp-app-direct-bridge-v34-20260624-rag-data-unified-judge"
+JUDGEMENT_CACHE_VERSION = "sp-app-direct-bridge-v48-20260703-remove-mfg-source-pages"
 
 
 # ============================================================
@@ -281,6 +287,19 @@ def _write_summary_csv_from_result(result: Any, output_path: Path) -> Path:
     컬럼:
     제조명, 검수합격, 검수불합격, 검수보류, 총 계
     """
+    if _is_albumin_document(result):
+        try:
+            export_dir = _ensure_dir(output_path.parent / f"{output_path.stem}_stage_summary_source")
+            export_results = export_stage_csvs(result=result, output_dir=export_dir)
+            source_summary = _write_export_summary_csv(
+                export_results=export_results,
+                csv_dir=export_dir,
+            )
+            shutil.copy2(source_summary, output_path)
+            return output_path
+        except Exception:
+            pass
+
     cards = build_stage_info_cards(result)
 
     rows: list[dict[str, Any]] = []
@@ -921,7 +940,11 @@ def ensure_judgement_artifacts(
     if result_cache_path.exists():
         try:
             artifacts = pickle.loads(result_cache_path.read_bytes())
-            if isinstance(artifacts, dict) and artifacts.get("after_result") is not None:
+            if (
+                    isinstance(artifacts, dict)
+                    and artifacts.get("after_result") is not None
+                    and artifacts.get("cache_version") == JUDGEMENT_CACHE_VERSION
+                ):
                 artifacts["root_dir"] = root_dir
                 artifacts["summary_before_path"] = summary_before_path
                 artifacts["summary_after_path"] = summary_after_path
@@ -993,6 +1016,7 @@ def ensure_judgement_artifacts(
 
     artifacts = {
         "artifact_key": key,
+        "cache_version": JUDGEMENT_CACHE_VERSION,
         "root_dir": root_dir,
         "before_result": before_result,
         "after_result": after_result,
@@ -1197,9 +1221,9 @@ def _render_summary_table(title: str, rows: list[dict[str, str]]) -> str:
           <thead>
             <tr>
               <th>제조명</th>
-              <th>검수합격</th>
-              <th>검수불합격</th>
-              <th>검수보류</th>
+              <th>충족</th>
+              <th>불충족</th>
+              <th>보류</th>
               <th>전체</th>
             </tr>
           </thead>
@@ -1675,18 +1699,39 @@ def render_final_judgement_page(
 
 
     if st.button("← 첫 화면으로 돌아가기"):
-        confirmed_address = str(st.session_state.get("gmail_confirmed_address", "") or "").strip()
-        confirmed_password = str(st.session_state.get("gmail_confirmed_app_password", "") or "").strip()
-        _clear_query_params()
+        gmail_state = {
+            "gmail_logged_in": st.session_state.get("gmail_logged_in", False),
+            "gmail_connected_address": st.session_state.get("gmail_connected_address", ""),
+            "gmail_confirm_version": st.session_state.get("gmail_confirm_version", ""),
+            "gmail_address": st.session_state.get("gmail_address", ""),
+            "gmail_app_password": st.session_state.get("gmail_app_password", ""),
+            "gmail_subject_keyword": st.session_state.get("gmail_subject_keyword", ""),
+            "gmail_since_date": st.session_state.get("gmail_since_date", None),
+            "gmail_confirmed_address": st.session_state.get("gmail_confirmed_address", ""),
+            "gmail_confirmed_app_password": st.session_state.get("gmail_confirmed_app_password", ""),
+            "gmail_confirmed_subject_keyword": st.session_state.get("gmail_confirmed_subject_keyword", ""),
+            "gmail_confirmed_since_date": st.session_state.get("gmail_confirmed_since_date", None),
+            "gmail_confirmed_search": st.session_state.get("gmail_confirmed_search", ""),
+        }
+        confirmed_address = str(gmail_state.get("gmail_confirmed_address") or gmail_state.get("gmail_connected_address") or gmail_state.get("gmail_address") or "").strip()
+        confirmed_password = str(gmail_state.get("gmail_confirmed_app_password") or gmail_state.get("gmail_app_password") or "").strip()
         st.session_state["run_sim"] = False
         st.session_state["last_gmail_sync_at"] = datetime.now().timestamp()
         st.session_state["last_gmail_sync_error"] = ""
         st.session_state["last_gmail_background_error"] = ""
         st.session_state["gmail_settings_open"] = False
+        for key, value in gmail_state.items():
+            if value not in (None, ""):
+                st.session_state[key] = value
         if confirmed_address and confirmed_password:
             st.session_state["gmail_logged_in"] = True
             st.session_state["gmail_connected_address"] = confirmed_address
+            st.session_state["gmail_address"] = confirmed_address
+            st.session_state["gmail_app_password"] = confirmed_password
+            st.session_state["gmail_confirmed_address"] = confirmed_address
+            st.session_state["gmail_confirmed_app_password"] = confirmed_password
             st.session_state["gmail_confirm_version"] = "manual-gmail-confirm-20260602-v2"
+        _clear_query_params()
         st.rerun()
 
     doc_company = str(getattr(selected_doc, "company", "") or "제출 문서")
@@ -1877,8 +1922,8 @@ def render_final_judgement_page(
               <div class="final-card-title">전체 요약</div>
               <p class="final-card-sub">{html.escape(doc_company)} · {html.escape(doc_product)}</p>
               <div class="final-card-counts">
-                <span class="final-card-pill pass">합격 {display_summary.passed}</span>
-                <span class="final-card-pill fail">불합격 {display_summary.failed}</span>
+                <span class="final-card-pill pass">충족 {display_summary.passed}</span>
+                <span class="final-card-pill fail">불충족 {display_summary.failed}</span>
                 <span class="final-card-pill hold">보류 {display_summary.held}</span>
               </div>
               <div class="final-card-total">총 {display_summary.total}개</div>
@@ -1894,6 +1939,10 @@ def render_final_judgement_page(
         </section>
         """
     )
+
+    general_info_html = _render_section1_pdf_pages(result)
+    if general_info_html:
+        combined_parts.append(general_info_html)
 
     if getattr(result, "manufacturing_summary_image_paths", None):
         combined_parts.append(

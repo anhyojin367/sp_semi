@@ -1868,11 +1868,77 @@ def _judge_semantic_qualitative_text(
 
     return None, None, None, None, None
 
+
+def _extract_100ml_ea_per_ml_value(text: str | None) -> float | None:
+    raw = clean_text(text)
+    if not raw:
+        return None
+
+    patterns = [
+        r"100\s*mL\s*(?:기준)?\s*[:：]?\s*([0-9]+(?:\.[0-9]+)?)\s*EA\s*/\s*mL",
+        r"100\s*밀리리터\s*(?:기준)?\s*[:：]?\s*([0-9]+(?:\.[0-9]+)?)\s*EA\s*/\s*mL",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, raw, flags=re.I)
+        if match:
+            try:
+                return float(match.group(1))
+            except ValueError:
+                return None
+
+    return None
+
+
+def _judge_albumin_100ml_particle_rule(
+    criteria: str | None,
+    result: str | None,
+) -> tuple[str | None, str | None, str | None, str | None, str | None]:
+    joined = clean_text(f"{criteria or ''} {result or ''}")
+    compact = _compact_semantic(joined)
+    if "100ml" not in compact and "100밀리리터" not in compact:
+        return None, None, None, None, None
+    if "eaml" not in compact and "ea/ml" not in compact:
+        return None, None, None, None, None
+    if not re.search(r"(10|25)\s*(?:㎛|μm|um)", joined, flags=re.I):
+        return None, None, None, None, None
+
+    value = _extract_100ml_ea_per_ml_value(result)
+    if value is None:
+        return None, None, None, None, None
+
+    if re.search(r"25\s*(?:㎛|μm|um)", joined, flags=re.I):
+        limit = 2.0
+        particle_label = "25 ㎛"
+    elif re.search(r"10\s*(?:㎛|μm|um)", joined, flags=re.I):
+        limit = 25.0
+        particle_label = "10 ㎛"
+    else:
+        return None, None, None, None, None
+
+    ok = value <= limit
+    status = PASS_LABEL if ok else FAIL_LABEL
+    reason = (
+        f"100 mL 기준 불용성미립자시험({particle_label}) 결과 {value:g} EA/mL가 "
+        f"기준 {limit:g} EA/mL 이하라 {PASS_REASON_WORD}으로 판단했습니다."
+        if ok
+        else
+        f"100 mL 기준 불용성미립자시험({particle_label}) 결과 {value:g} EA/mL가 "
+        f"기준 {limit:g} EA/mL를 초과해 {FAIL_REASON_WORD}으로 판단했습니다."
+    )
+    return (
+        status,
+        reason,
+        "albumin_100ml_particle_rule",
+        f"100 mL, {particle_label} 이상: <= {limit:g} EA/mL",
+        f"100 mL 기준: {value:g} EA/mL",
+    )
+
 def _judge_special_rule(
     criteria: str | None,
     result: str | None,
 ) -> tuple[str | None, str | None, str | None, str | None, str | None]:
     for judge_func in [
+        _judge_albumin_100ml_particle_rule,
         _judge_limit_expression_text,
         _judge_bp_band_pattern,
         _judge_loq_text,

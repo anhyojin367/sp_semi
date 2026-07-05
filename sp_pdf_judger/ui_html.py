@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import re
+import tempfile
 from pathlib import Path
+
+import fitz
 from typing import Any
 
 from .manufacturing_info_validator import _norm_match
@@ -19,7 +23,7 @@ def render_summary_card(summary: Summary) -> str:
         attention = f"""
         <div class="final-attention">
           <b>▲ 확인이 필요한 항목</b>
-          <span>불합격 {summary.failed}건 · 보류 {summary.held}건</span>
+          <span>불충족 {summary.failed}건 · 보류 {summary.held}건</span>
         </div>
         """
     else:
@@ -51,8 +55,8 @@ def render_summary_card(summary: Summary) -> str:
       <div class="final-overview">
         <div class="final-overview-title">전체 요약</div>
         <div class="final-summary-metrics">
-          <div class="pass"><span>● 합격</span><b>{summary.passed}</b></div>
-          <div class="fail"><span>● 불합격</span><b>{summary.failed}</b></div>
+          <div class="pass"><span>● 충족</span><b>{summary.passed}</b></div>
+          <div class="fail"><span>● 불충족</span><b>{summary.failed}</b></div>
           <div class="hold"><span>● 보류</span><b>{summary.held}</b></div>
           <div class="total"><span>전체 항목</span><b>{summary.total}</b></div>
         </div>
@@ -78,6 +82,141 @@ def _render_section_number_anchor(section_number: str) -> str:
         return ""
     return f'<span id="{anchor_id}" class="mfg-scroll-anchor"></span>'
 
+
+def _node_is_section_one(node: TreeNode) -> bool:
+    section_number = clean_text(getattr(node, "section_number", ""))
+    if section_number:
+        return section_number == "1" or section_number.startswith("1.")
+
+    title = clean_text(getattr(node, "title", ""))
+    return bool(re.match(r"^1(?:\\s|$|\\.)", title))
+
+
+def _section1_pdf_page_numbers(result: ProcessingResult) -> list[int]:
+    pages: set[int] = set()
+
+    for record in list(getattr(result, "extracted_records", []) or []):
+        section_number = clean_text(getattr(record, "section_number", ""))
+        if not (section_number == "1" or section_number.startswith("1.")):
+            continue
+
+        try:
+            start = int(getattr(record, "page_start", 0) or 0)
+            end = int(getattr(record, "page_end", start) or start)
+        except Exception:
+            continue
+
+        if start <= 0:
+            continue
+
+        for page_number in range(start, max(start, end) + 1):
+            pages.add(page_number)
+
+    return sorted(pages)
+
+
+def _result_pdf_page_cache_dir(pdf_path: Path) -> Path:
+    try:
+        stat = pdf_path.stat()
+        source = f"{pdf_path.resolve()}::{stat.st_size}::{stat.st_mtime_ns}"
+    except Exception:
+        source = str(pdf_path)
+    digest = hashlib.sha1(source.encode("utf-8", "ignore")).hexdigest()[:16]
+    cache_dir = Path(tempfile.gettempdir()) / "sp_result_section_pages" / digest
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir
+
+
+def _render_result_pdf_page(pdf_path: Path, page_number: int) -> Path | None:
+    try:
+        out_path = _result_pdf_page_cache_dir(pdf_path) / f"section1_page_{page_number}.png"
+        if out_path.exists() and out_path.stat().st_size > 0:
+            return out_path
+
+        with fitz.open(pdf_path) as doc:
+            if page_number < 1 or page_number > len(doc):
+                return None
+            pix = doc[page_number - 1].get_pixmap(matrix=fitz.Matrix(1.55, 1.55), alpha=False)
+            pix.save(str(out_path))
+        return out_path
+    except Exception:
+        return None
+
+
+def _image_file_to_base64(path: Path) -> str:
+    return base64.b64encode(path.read_bytes()).decode("utf-8")
+
+
+def _render_section1_pdf_pages(result: ProcessingResult) -> str:
+    pdf_path = Path(getattr(result, "pdf_path", "") or "")
+    if not pdf_path.exists():
+        return ""
+
+    excluded_pages = set(getattr(result, "manufacturing_summary_page_numbers", []) or [])
+    image_html: list[str] = []
+    for page_number in _section1_pdf_page_numbers(result):
+        if page_number in excluded_pages:
+            continue
+
+        image_path = _render_result_pdf_page(pdf_path, page_number)
+        if not image_path or not image_path.exists():
+            continue
+        image_html.append(
+            f"""
+            <figure class="section-one-pdf-page">
+              <figcaption>원문 페이지 {page_number}</figcaption>
+              <img src="data:image/png;base64,{_image_file_to_base64(image_path)}" />
+            </figure>
+            """
+        )
+
+    if not image_html:
+        return ""
+
+    return f"""
+    <style>
+      .section-one-pdf-pages {{
+        width: min(940px, 100%);
+        margin: 0 auto 28px;
+        padding: 0;
+        box-sizing: border-box;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Malgun Gothic", sans-serif;
+      }}
+      .section-one-pdf-pages h2 {{
+        margin: 0 0 12px;
+        color: #111827;
+        font-size: 20px;
+        font-weight: 950;
+        letter-spacing: 0;
+      }}
+      .section-one-pdf-page {{
+        width: 100%;
+        margin: 0 0 18px;
+        padding: 0;
+        background: #fff;
+        border-radius: 12px;
+        box-shadow: 0 18px 46px rgba(0, 0, 0, 0.20);
+        overflow: hidden;
+      }}
+      .section-one-pdf-page figcaption {{
+        padding: 10px 14px;
+        background: #f8fafc;
+        border-bottom: 1px solid #e5e7eb;
+        color: #334155;
+        font-size: 13px;
+        font-weight: 850;
+      }}
+      .section-one-pdf-page img {{
+        display: block;
+        width: 100%;
+        height: auto;
+      }}
+    </style>
+    <section class="section-one-pdf-pages">
+      <h2>일반정보</h2>
+      {''.join(image_html)}
+    </section>
+    """
 
 def _add_unique_alias(aliases: list[str], alias: str) -> None:
     alias = clean_text(alias)
@@ -624,6 +763,25 @@ def _render_lot_table(ev) -> str:
     """
 
 
+def _display_judgement_reason_text(text: str | None) -> str:
+    text = clean_text(text or "")
+    if not text:
+        return ""
+    return (
+        text.replace("검수불합격", "불충족")
+        .replace("검수합격", "충족")
+        .replace("검수보류", "보류")
+        .replace("불합격으로 판단", "불충족으로 판단")
+        .replace("합격으로 판단", "충족으로 판단")
+        .replace("불합격으로판단", "불충족으로판단")
+        .replace("합격으로판단", "충족으로판단")
+        .replace("불합격입니다", "불충족입니다")
+        .replace("합격입니다", "충족입니다")
+        .replace("불합격 처리", "불충족 처리")
+        .replace("합격 처리", "충족 처리")
+    )
+
+
 def _render_reason_box(ev) -> str:
     if not getattr(ev, "comparison_completed", False):
         return ""
@@ -632,22 +790,22 @@ def _render_reason_box(ev) -> str:
 
     if rows:
         reason_html = "".join(
-            f'<div style="margin-top:6px;"><b>{html_escape(row.get("item_value") or row.get("lot_no", ""))}</b>: {html_escape(row.get("reason", ""))}</div>'
+            f'<div style="margin-top:6px;"><b>{html_escape(row.get("item_value") or row.get("lot_no", ""))}</b>: {html_escape(_display_judgement_reason_text(row.get("reason", "")))}</div>'
             for row in rows
             if (row.get("item_value") or row.get("lot_no")) and row.get("reason")
         )
     else:
         if not getattr(ev, "reason", ""):
             return ""
-        reason_html = html_escape(ev.reason)
+        reason_html = html_escape(_display_judgement_reason_text(ev.reason))
 
     normalized = ""
 
     if ev.normalized_criteria or ev.normalized_result:
         normalized = f"""
         <div style="margin-top:12px;color:#4b5563;line-height:1.7;font-size:16px;">
-          {f'<div>정규화 시험기준: {html_escape(ev.normalized_criteria)}</div>' if ev.normalized_criteria else ''}
-          {f'<div>정규화 시험결과: {html_escape(ev.normalized_result)}</div>' if ev.normalized_result else ''}
+          {f'<div>정규화 시험기준: {html_escape(_display_judgement_reason_text(ev.normalized_criteria))}</div>' if ev.normalized_criteria else ''}
+          {f'<div>정규화 시험결과: {html_escape(_display_judgement_reason_text(ev.normalized_result))}</div>' if ev.normalized_result else ''}
         </div>
         """
 
@@ -983,6 +1141,71 @@ def _render_section(
     """
 
 
+def _mfg_join_flow_display_line(lines: list[str]) -> str:
+    joined = "\n".join(lines)
+    if "Component A" not in joined or "Component B" not in joined:
+        return ""
+
+    def _stage_with_date(component_label: str) -> str:
+        stage_name = f"{component_label} 중간체원액"
+        match = re.search(rf"{re.escape(stage_name)}\(([^)]+)\)", joined)
+        if match:
+            return f"{stage_name}({match.group(1)})"
+        return stage_name
+
+    join_tail = ""
+    for line in lines:
+        if line.startswith("공통 흐름:") or line.startswith("합류 흐름:"):
+            join_tail = line.split(":", 1)[1].strip()
+            break
+
+    for marker in ("나노파티클원액", "최종원액", "완제의약품"):
+        marker_idx = join_tail.find(marker)
+        if marker_idx >= 0:
+            join_tail = join_tail[marker_idx:]
+            break
+
+    if not join_tail:
+        join_tail = "나노파티클원액 → 최종원액 → 완제의약품"
+
+    return f"합류 흐름: {_stage_with_date('Component A')}, {_stage_with_date('Component B')} → {join_tail}"
+
+
+def _mfg_error_scope_display_line(lines: list[str]) -> str:
+    scopes: list[str] = []
+    in_error_section = False
+    join_tokens = ("공통 흐름", "합류 흐름", "나노파티클원액", "최종원액", "완제의약품")
+
+    for line in lines:
+        if line == "오류 항목":
+            in_error_section = True
+            continue
+
+        is_error_line = in_error_section or "오류" in line or "불일치" in line or "역전" in line
+        if not is_error_line:
+            continue
+
+        if any(token in line for token in join_tokens):
+            if "합류 흐름" not in scopes:
+                scopes.append("합류 흐름")
+            continue
+
+        if "Component A" in line and "Component A 흐름" not in scopes:
+            scopes.append("Component A 흐름")
+        if "Component B" in line and "Component B 흐름" not in scopes:
+            scopes.append("Component B 흐름")
+
+    if not scopes:
+        return ""
+    if "합류 흐름" in scopes:
+        return "오류 위치: 합류 흐름"
+    return "오류 위치: " + " / ".join(scopes)
+
+
+def _mfg_is_redundant_join_check_line(line: str) -> bool:
+    return "마지막 공정" in line and "첫 공정" in line
+
+
 def render_manufacturing_summary_card(result: ProcessingResult) -> str:
     status = result.manufacturing_summary_status
     reason = result.manufacturing_summary_reason
@@ -1013,9 +1236,9 @@ def render_manufacturing_summary_card(result: ProcessingResult) -> str:
     elif status == HOLD_LABEL:
         conclusion = "제조요약도 날짜 정보를 안정적으로 확정하기 어려워 검수보류입니다."
 
-    display_reason = clean_text(reason or "")
+    display_reason = _display_judgement_reason_text(reason or "")
     if conclusion and conclusion not in display_reason:
-        display_reason = (display_reason + "\n\n" + conclusion).strip()
+        display_reason = (display_reason + "\n\n" + _display_judgement_reason_text(conclusion)).strip()
 
     reason_lines = [
         clean_text(line)
@@ -1027,17 +1250,35 @@ def render_manufacturing_summary_card(result: ProcessingResult) -> str:
     flow_lines = [
         line.lstrip("- ").strip()
         for line in detail_lines
-        if "→" in line or "->" in line
+        if ("→" in line or "->" in line)
+        and not _mfg_is_redundant_join_check_line(line.lstrip("- ").strip())
     ]
+    error_scope_line = _mfg_error_scope_display_line(detail_lines)
+    join_flow_line = _mfg_join_flow_display_line(flow_lines)
+    if join_flow_line:
+        replaced_common_flow = False
+        for idx, line in enumerate(flow_lines):
+            if line.startswith("공통 흐름:") or line.startswith("합류 흐름:"):
+                flow_lines[idx] = join_flow_line
+                replaced_common_flow = True
+                break
+        if not replaced_common_flow:
+            flow_lines.append(join_flow_line)
     check_lines = [
         line.lstrip("- ").strip()
         for line in detail_lines
-        if line.lstrip("- ").strip() not in flow_lines and line not in {"공정 흐름", "합류 검증"}
+        if (
+            line.lstrip("- ").strip() not in flow_lines
+            and line not in {"공정 흐름", "합류 검증"}
+            and not _mfg_is_redundant_join_check_line(line.lstrip("- ").strip())
+        )
     ]
     flow_html = "".join(
         f'<div class="mfg-flow-box">{html_escape(line)}</div>'
         for line in flow_lines[:8]
     )
+    if error_scope_line:
+        check_lines = [error_scope_line] + [line for line in check_lines if line != error_scope_line and line != "오류 항목"]
     check_html = "".join(
         f'<li>{html_escape(line)}</li>'
         for line in check_lines[:12]
@@ -1065,7 +1306,7 @@ def render_manufacturing_summary_card(result: ProcessingResult) -> str:
     <section class="mfg-date-card">
       <div class="mfg-date-head">
         <div>
-          <div class="mfg-date-title">공정일자 정합성 검증</div>
+          <div class="mfg-date-title">정합성 검증-선행 검증</div>
           {f'<div class="mfg-date-sub">{html_escape(page_text)}</div>' if page_text else ''}
         </div>
         <div class="mfg-date-badge">
@@ -1096,6 +1337,47 @@ def render_result_html(result: ProcessingResult) -> str:
       overflow: hidden;
     }
 
+    .section-one-pdf-pages {
+      width: min(940px, 100%);
+      margin: 0 auto 28px;
+      padding: 0;
+      box-sizing: border-box;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Malgun Gothic", sans-serif;
+    }
+
+    .section-one-pdf-pages h2 {
+      margin: 0 0 12px;
+      color: #111827;
+      font-size: 20px;
+      font-weight: 950;
+      letter-spacing: 0;
+    }
+
+    .section-one-pdf-page {
+      width: 100%;
+      margin: 0 0 18px;
+      padding: 0;
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 18px 46px rgba(0, 0, 0, 0.20);
+      overflow: hidden;
+    }
+
+    .section-one-pdf-page figcaption {
+      padding: 10px 14px;
+      background: #f8fafc;
+      border-bottom: 1px solid #e5e7eb;
+      color: #334155;
+      font-size: 13px;
+      font-weight: 850;
+    }
+
+    .section-one-pdf-page img {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
     details > summary::-webkit-details-marker { display:none; }
     details > summary::before {
       content: "▸";
@@ -1112,7 +1394,12 @@ def render_result_html(result: ProcessingResult) -> str:
     </style>
     """
 
-    if not result.tree:
+    judgement_nodes = [
+        node for node in result.tree
+        if not _node_is_section_one(node)
+    ]
+
+    if not judgement_nodes:
         body = """
         <div style="border:1px solid #e5e7eb;border-radius:14px;padding:18px;background:#ffffff;color:#6b7280;">
           표시할 시험 항목이 없습니다.
@@ -1120,7 +1407,7 @@ def render_result_html(result: ProcessingResult) -> str:
         """
     else:
         records = _load_records_json_for_ui(result)
-        existing_section_numbers = _collect_tree_section_numbers(result.tree)
+        existing_section_numbers = _collect_tree_section_numbers(judgement_nodes)
 
         body = "".join(
             _render_section(
@@ -1129,7 +1416,7 @@ def render_result_html(result: ProcessingResult) -> str:
                 records=records,
                 existing_section_numbers=existing_section_numbers,
             )
-            for node in result.tree
+            for node in judgement_nodes
         )
 
     return styles + body

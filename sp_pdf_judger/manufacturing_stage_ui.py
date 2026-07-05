@@ -5,6 +5,7 @@ import csv
 import hashlib
 import html
 import re
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -410,6 +411,76 @@ def _image_to_base64(image_path: Path) -> str:
     return base64.b64encode(image_path.read_bytes()).decode("utf-8")
 
 
+def _pdf_render_cache_dir(pdf_path: Path) -> Path:
+    try:
+        stat = pdf_path.stat()
+        source = f"{pdf_path.resolve()}::{stat.st_size}::{stat.st_mtime_ns}"
+    except Exception:
+        source = str(pdf_path)
+    digest = hashlib.sha1(source.encode("utf-8", "ignore")).hexdigest()[:16]
+    cache_dir = Path(tempfile.gettempdir()) / "sp_albumin_source_pages" / digest
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir
+
+
+def _render_pdf_page_to_cache(pdf_path: Path, page_number: int, tag: str) -> Path | None:
+    try:
+        cache_dir = _pdf_render_cache_dir(pdf_path)
+        out_path = cache_dir / f"{tag}_page_{page_number}.png"
+        if out_path.exists() and out_path.stat().st_size > 0:
+            return out_path
+        with fitz.open(pdf_path) as doc:
+            if page_number < 1 or page_number > len(doc):
+                return None
+            page = doc[page_number - 1]
+            pix = page.get_pixmap(matrix=fitz.Matrix(1.65, 1.65), alpha=False)
+            pix.save(str(out_path))
+        return out_path
+    except Exception:
+        return None
+
+
+def _albumin_source_material_page_numbers(result: ProcessingResult) -> list[int]:
+    if not _is_albumin_result(result):
+        return []
+    pages: set[int] = set()
+    for record in list(getattr(result, "extracted_records", []) or []):
+        if clean_text(_get(record, "section_number", "")) != "1.2":
+            continue
+        try:
+            start = int(_get(record, "page_start", 0) or 0)
+            end = int(_get(record, "page_end", start) or start)
+        except Exception:
+            continue
+        if start <= 0:
+            continue
+        for page_number in range(start, max(start, end) + 1):
+            pages.add(page_number)
+    return sorted(pages)
+
+
+def _render_albumin_source_material_pages(result: ProcessingResult) -> str:
+    pdf_path = Path(getattr(result, "pdf_path", "") or "")
+    if not pdf_path.exists():
+        return ""
+    image_parts: list[str] = []
+    for page_number in _albumin_source_material_page_numbers(result):
+        image_path = _render_pdf_page_to_cache(pdf_path, page_number, "source_material")
+        if not image_path or not image_path.exists():
+            continue
+        image_parts.append(
+            f'<div class="mfg-source-page"><img src="data:image/png;base64,{_image_to_base64(image_path)}" /></div>'
+        )
+    if not image_parts:
+        return ""
+    return (
+        '<section class="mfg-source-pages">'
+        '<div class="mfg-source-title">원료물질 / 채장혈액원 정보 원문</div>'
+        + "".join(image_parts)
+        + '</section>'
+    )
+
+
 def _evaluation_status_key(evaluation: Any) -> str:
     status = clean_text(_get(evaluation, "final_status", ""))
 
@@ -630,6 +701,57 @@ def _extract_stage_names_from_flowchart_records(result: ProcessingResult) -> lis
     return names
 
 
+def _result_text_for_albumin_detection(result: ProcessingResult) -> str:
+    parts: list[str] = []
+    parts.append(clean_text(getattr(result, "product_name", "")))
+    records = list(getattr(result, "extracted_records", []) or []) or list(getattr(result, "records", []) or [])
+    for record in records:
+        parts.append(" ".join([
+            clean_text(_get(record, "section_number", "")),
+            clean_text(_get(record, "section_title", "")),
+            clean_text(_get(record, "content", "")),
+            clean_text(_get(record, "raw_text", "")),
+        ]))
+    for evaluation in list(getattr(result, "evaluations", []) or []):
+        parts.append(" ".join([
+            clean_text(_get(evaluation, "section_number", "")),
+            clean_text(_get(evaluation, "section_title", "")),
+            clean_text(_get(evaluation, "test_name", "")),
+            clean_text(_get(evaluation, "raw_text", "")),
+        ]))
+    return " ".join(part for part in parts if part)
+
+
+def _is_albumin_result(result: ProcessingResult) -> bool:
+    text = _norm_match(_result_text_for_albumin_detection(result))
+    return bool(
+        ("동국알부민" in text or "humanserumalbumin" in text or "albumin" in text)
+        and ("원료혈장" in text or "원획분" in text)
+    )
+
+
+def _albumin_display_card_names() -> set[str]:
+    return {
+        _norm_match("원료혈장1"),
+        _norm_match("원획분1"),
+        _norm_match("최종원액"),
+        _norm_match("완제의약품"),
+    }
+
+
+def _albumin_card_position(display_name: str) -> tuple[float, float, str]:
+    key = _norm_match(display_name)
+    # Albumin manufacturing-summary cards stay outside the PDF image, but their
+    # vertical positions track the visible process rows in the rendered summary.
+    positions = {
+        _norm_match("원료혈장1"): (10.0, 22.0, "left"),
+        _norm_match("원획분"): (81.0, 48.0, "right"),
+        _norm_match("최종원액"): (81.0, 62.0, "right"),
+        _norm_match("완제의약품"): (81.0, 80.0, "right"),
+    }
+    return positions.get(key, (50.0, 95.0, "right"))
+
+
 def _build_stage_test_summary_map(result: ProcessingResult) -> dict[str, dict]:
     evaluations = list(getattr(result, "evaluations", []) or [])
     record_map = _record_by_order_idx(result)
@@ -712,6 +834,10 @@ def build_stage_info_cards(
         return []
 
     stage_boxes = _extract_stage_box_positions_from_pdf(Path(pdf_path))
+    albumin_result = _is_albumin_result(result)
+    if albumin_result:
+        keep = _albumin_display_card_names()
+        stage_boxes = [stage for stage in stage_boxes if _norm_match(stage["display_name"]) in keep]
     summary_map = _build_stage_test_summary_map(result)
     summary_override_map = _read_stage_summary_counts(summary_counts_path)
     manufacturing_results = manufacturing_results or []
@@ -762,12 +888,18 @@ def build_stage_info_cards(
 
         used_keys.add(key)
 
+        card_x = float(stage["x_pct"])
+        card_y = float(stage["y_pct"])
+        card_side = str(stage["side"])
+        if albumin_result:
+            card_x, card_y, card_side = _albumin_card_position(display_name)
+
         cards.append(
             StageTestCard(
                 display_name=display_name,
-                x_pct=float(stage["x_pct"]),
-                y_pct=float(stage["y_pct"]),
-                side=str(stage["side"]),
+                x_pct=card_x,
+                y_pct=card_y,
+                side=card_side,
                 passed=int(info["passed"]),
                 failed=int(info["failed"]),
                 held=int(info["held"]),
@@ -781,6 +913,8 @@ def build_stage_info_cards(
 
     for key, info in summary_map.items():
         if key in used_keys:
+            continue
+        if albumin_result and key not in _albumin_display_card_names():
             continue
 
         display_name = str(info["stage_name"])
@@ -856,11 +990,25 @@ def build_stage_info_cards(
         target.manufacturing_holds += card.manufacturing_holds
 
     fallback_cards = [grouped[key] for key in group_order]
-    count = len(fallback_cards)
-    for idx, card in enumerate(fallback_cards):
-        card.x_pct = 0.0
-        card.y_pct = 12.0 + (70.0 * idx / max(count - 1, 1))
-        card.side = "left"
+    if albumin_result:
+        for card in fallback_cards:
+            key = _norm_match(card.display_name)
+            if "원료혈장" in key:
+                card.x_pct, card.y_pct, card.side = 10.0, 22.0, "left"
+            elif "원획분" in key:
+                card.x_pct, card.y_pct, card.side = 81.0, 48.0, "right"
+            elif "최종원액" in key:
+                card.x_pct, card.y_pct, card.side = 81.0, 62.0, "right"
+            elif "완제의약품" in key:
+                card.x_pct, card.y_pct, card.side = 81.0, 80.0, "right"
+            else:
+                card.x_pct, card.y_pct, card.side = 50.0, 95.0, "right"
+    else:
+        count = len(fallback_cards)
+        for idx, card in enumerate(fallback_cards):
+            card.x_pct = 0.0
+            card.y_pct = 12.0 + (70.0 * idx / max(count - 1, 1))
+            card.side = "left"
 
     return positioned + fallback_cards
 
@@ -892,23 +1040,53 @@ def summarize_stage_info_cards(result: ProcessingResult) -> Summary:
     )
 
 
-def _card_position(card: StageTestCard) -> tuple[str, float]:
-    """
-    제조요약도 이미지의 좌우 바깥에 같은 간격으로 카드를 배치한다.
+def _uses_dense_side_layout(cards: list[StageTestCard]) -> bool:
+    if len(cards) < 4:
+        return False
+    names = " ".join(clean_text(card.display_name) for card in cards)
+    return "원료혈장" in names or "원획분" in names or "동국알부민" in names
 
-    기존처럼 왼쪽을 고정 -px 값으로 밀면 카드 폭을 키웠을 때
-    왼쪽 카드는 이미지와 겹치고, 오른쪽 카드는 이미지 밖으로 떨어져 보여
-    좌우 간격이 맞지 않는다.
 
-    따라서 카드 폭과 간격은 CSS 변수 하나로 관리하고,
-    왼쪽은 -(카드폭 + 간격), 오른쪽은 100% + 간격으로 둔다.
-    """
+def _stabilize_dense_side_card_positions(cards: list[StageTestCard]) -> None:
+    if not _uses_dense_side_layout(cards):
+        return
+
+    for side in ("left", "right"):
+        side_cards = sorted(
+            [card for card in cards if (card.side or "right") == side],
+            key=lambda card: (card.y_pct, card.x_pct, card.display_name),
+        )
+        if not side_cards:
+            continue
+
+        min_top = 6.0
+        max_top = 82.0
+        min_gap = 18.0
+        desired = [max(min_top, min(max_top, card.y_pct - 5.0)) for card in side_cards]
+
+        for idx in range(1, len(desired)):
+            desired[idx] = max(desired[idx], desired[idx - 1] + min_gap)
+
+        overflow = desired[-1] - max_top
+        if overflow > 0:
+            desired = [top - overflow for top in desired]
+
+        underflow = min_top - desired[0]
+        if underflow > 0:
+            desired = [top + underflow for top in desired]
+
+        for card, top in zip(side_cards, desired):
+            card.y_pct = max(min_top, min(max_top, top))
+
+
+def _card_position(card: StageTestCard, dense_layout: bool = False) -> tuple[str, float]:
+    """Place side cards near the corresponding manufacturing-summary region."""
     if card.side == "left":
-        left = "calc(-1 * (var(--mfg-card-width) + var(--mfg-card-gap)))"
+        left = "calc(-1 * (var(--mfg-card-width) + 8px))" if dense_layout else "calc(-1 * (var(--mfg-card-width) + var(--mfg-card-gap)))"
     else:
         left = "calc(100% + var(--mfg-card-gap))"
 
-    top = card.y_pct - 4.0
+    top = card.y_pct if dense_layout else card.y_pct - 4.0
     top = max(1.0, min(92.0, top))
 
     return left, top
@@ -927,8 +1105,8 @@ def _border_class_for_card(card: StageTestCard) -> str:
     return "pass"
 
 
-def _render_stage_test_card(card: StageTestCard) -> str:
-    left, top = _card_position(card)
+def _render_stage_test_card(card: StageTestCard, dense_layout: bool = False) -> str:
+    left, top = _card_position(card, dense_layout=dense_layout)
     border_class = _border_class_for_card(card)
     title = html.escape(card.display_name)
     test_anchor = html.escape(_stage_anchor_key(card.display_name))
@@ -954,8 +1132,8 @@ def _render_stage_test_card(card: StageTestCard) -> str:
         <div class="mfg-side-title">{title}</div>
 
         <div class="mfg-count-row">
-            <span class="count-pill pass">합격 {card.passed}</span>
-            <span class="count-pill fail">불합격 {card.failed}</span>
+            <span class="count-pill pass">충족 {card.passed}</span>
+            <span class="count-pill fail">불충족 {card.failed}</span>
             <span class="count-pill hold">보류 {card.held}</span>
         </div>
 
@@ -969,11 +1147,87 @@ def _display_process_date_text(text: str) -> str:
     if not text:
         return ""
     return (
-        text.replace("제조요약도 날짜 선행관계 판정", "공정일자 정합성 검증")
+        text.replace("제조요약도 날짜 선행관계 판정", "정합성 검증-선행 검증")
         .replace("날짜 선행관계", "공정일자 정합성")
         .replace("날짜 선행 관계", "공정일자 정합성")
         .replace("날짜 선후관계", "공정일자 선후관계")
+        .replace("검수불합격", "불충족")
+        .replace("검수합격", "충족")
+        .replace("검수보류", "보류")
+        .replace("불합격으로 판단", "불충족으로 판단")
+        .replace("합격으로 판단", "충족으로 판단")
+        .replace("불합격으로판단", "불충족으로판단")
+        .replace("합격으로판단", "충족으로판단")
+        .replace("불합격입니다", "불충족입니다")
+        .replace("합격입니다", "충족입니다")
+        .replace("불합격 처리", "불충족 처리")
+        .replace("합격 처리", "충족 처리")
     )
+
+
+def _process_date_join_flow_display_line(lines: list[str]) -> str:
+    joined = "\n".join(lines)
+    if "Component A" not in joined or "Component B" not in joined:
+        return ""
+
+    def _stage_with_date(component_label: str) -> str:
+        stage_name = f"{component_label} 중간체원액"
+        match = re.search(rf"{re.escape(stage_name)}\(([^)]+)\)", joined)
+        if match:
+            return f"{stage_name}({match.group(1)})"
+        return stage_name
+
+    join_tail = ""
+    for line in lines:
+        if line.startswith("공통 흐름:") or line.startswith("합류 흐름:"):
+            join_tail = line.split(":", 1)[1].strip()
+            break
+
+    for marker in ("나노파티클원액", "최종원액", "완제의약품"):
+        marker_idx = join_tail.find(marker)
+        if marker_idx >= 0:
+            join_tail = join_tail[marker_idx:]
+            break
+
+    if not join_tail:
+        join_tail = "나노파티클원액 → 최종원액 → 완제의약품"
+
+    return f"합류 흐름: {_stage_with_date('Component A')}, {_stage_with_date('Component B')} → {join_tail}"
+
+
+def _process_date_error_scope_display_line(lines: list[str]) -> str:
+    scopes: list[str] = []
+    in_error_section = False
+    join_tokens = ("공통 흐름", "합류 흐름", "나노파티클원액", "최종원액", "완제의약품")
+
+    for line in lines:
+        if line == "오류 항목":
+            in_error_section = True
+            continue
+
+        is_error_line = in_error_section or "오류" in line or "불일치" in line or "역전" in line
+        if not is_error_line:
+            continue
+
+        if any(token in line for token in join_tokens):
+            if "합류 흐름" not in scopes:
+                scopes.append("합류 흐름")
+            continue
+
+        if "Component A" in line and "Component A 흐름" not in scopes:
+            scopes.append("Component A 흐름")
+        if "Component B" in line and "Component B 흐름" not in scopes:
+            scopes.append("Component B 흐름")
+
+    if not scopes:
+        return ""
+    if "합류 흐름" in scopes:
+        return "오류 위치: 합류 흐름"
+    return "오류 위치: " + " / ".join(scopes)
+
+
+def _process_date_is_redundant_join_check_line(line: str) -> bool:
+    return "마지막 공정" in line and "첫 공정" in line
 
 
 def _process_date_status_class(status: str) -> str:
@@ -990,6 +1244,7 @@ def _process_date_status_class(status: str) -> str:
 def _render_process_date_summary_card(
     result: ProcessingResult,
     cards: list[StageTestCard],
+    dense_layout: bool = False,
 ) -> str:
     status = clean_text(getattr(result, "manufacturing_summary_status", ""))
     reason = clean_text(getattr(result, "manufacturing_summary_reason", ""))
@@ -1017,7 +1272,29 @@ def _render_process_date_summary_card(
         line
         for line in lines[1:]
         if line not in {"공정 흐름", "합류 검증"}
-    ][:2]
+    ]
+    error_scope_line = _process_date_error_scope_display_line(detail_lines)
+    join_flow_line = _process_date_join_flow_display_line(detail_lines)
+    if join_flow_line:
+        replaced_common_flow = False
+        for idx, line in enumerate(detail_lines):
+            if line.startswith("공통 흐름:") or line.startswith("합류 흐름:"):
+                detail_lines[idx] = join_flow_line
+                replaced_common_flow = True
+                break
+        if not replaced_common_flow:
+            detail_lines.append(join_flow_line)
+    if error_scope_line:
+        detail_lines = [error_scope_line] + [line for line in detail_lines if line != error_scope_line]
+    detail_lines = [
+        line
+        for line in detail_lines
+        if (
+            line != "오류 항목"
+            and not line.startswith("합류 검증")
+            and not _process_date_is_redundant_join_check_line(line)
+        )
+    ][:4]
 
     page_text = ""
     page_numbers = getattr(result, "manufacturing_summary_page_numbers", None) or []
@@ -1042,10 +1319,11 @@ def _render_process_date_summary_card(
         for line in detail_lines
     )
 
+    inline_class = " mfg-date-inline-card" if dense_layout else ""
     return f"""
-    <div class="mfg-date-side-card {status_class}" style="left:{left_css}; top:{top:.2f}%;">
+    <div class="mfg-date-side-card {status_class}{inline_class}" style="left:{left_css}; top:{top:.2f}%;">
         <div class="mfg-date-side-kicker">{html.escape(page_text or "제조요약도")}</div>
-        <div class="mfg-date-side-title">공정일자 정합성 검증</div>
+        <div class="mfg-date-side-title">정합성 검증-선행 검증</div>
         <div class="mfg-date-side-badge">{html.escape(status or "미판정")}</div>
         <div class="mfg-date-side-body">{html.escape(lead_line)}</div>
         {details_html}
@@ -1079,11 +1357,15 @@ def render_manufacturing_summary_with_stage_cards(
         return info_validation_html
 
     image_b64 = _image_to_base64(image_path)
+    dense_side_layout = _uses_dense_side_layout(cards)
+    if dense_side_layout:
+        _stabilize_dense_side_card_positions(cards)
     cards_html = "\n".join(
-        _render_stage_test_card(card)
+        _render_stage_test_card(card, dense_layout=dense_side_layout)
         for card in cards
     )
-    date_summary_html = _render_process_date_summary_card(result, cards)
+    date_summary_html = _render_process_date_summary_card(result, cards, dense_layout=dense_side_layout)
+    dense_class = " dense-side-layout" if dense_side_layout else ""
 
     manufacturing_summary_html = f"""
     <style>
@@ -1142,6 +1424,34 @@ def render_manufacturing_summary_with_stage_cards(
     .mfg-side-card:hover {{
         transform: translateY(-1px);
         box-shadow: 0 9px 20px rgba(15, 23, 42, 0.17);
+    }}
+
+    .dense-side-layout {{
+        --mfg-card-width: 236px;
+        --mfg-card-gap: 34px;
+        max-width: 1700px;
+    }}
+
+    .dense-side-layout .mfg-side-card {{
+        min-height: 98px;
+        padding: 13px 14px;
+        border-radius: 14px;
+    }}
+
+    .dense-side-layout .mfg-side-title {{
+        font-size: 15px;
+        margin-bottom: 11px;
+    }}
+
+    .dense-side-layout .count-pill {{
+        padding: 6px 0;
+        font-size: 12px;
+    }}
+
+    .dense-side-layout .mfg-total-row {{
+        margin-top: 8px;
+        padding: 6px 0;
+        font-size: 13px;
     }}
 
     .mfg-side-card.pass {{
@@ -1294,6 +1604,15 @@ def render_manufacturing_summary_with_stage_cards(
         border-top: 1px solid #e5e7eb;
     }}
 
+    .dense-side-layout .mfg-date-inline-card {{
+        position: relative;
+        left: auto !important;
+        top: auto !important;
+        width: min(520px, calc(100% - 32px));
+        margin: 18px auto 0;
+        z-index: 5;
+    }}
+
     @media (max-width: 1180px) {{
         .mfg-summary-area {{
             padding: 0 8px;
@@ -1320,7 +1639,7 @@ def render_manufacturing_summary_with_stage_cards(
     }}
     </style>
 
-    <div class="mfg-summary-area">
+    <div class="mfg-summary-area{dense_class}">
         <div class="mfg-image-box">
             <img src="data:image/png;base64,{image_b64}" />
             {cards_html}
