@@ -42,7 +42,7 @@ JUDGE_COMPONENT_HEIGHT = 10000
 FINAL_JUDGEMENT_VIEWPORT_HEIGHT = 860
 JUDGEMENT_STATUS_DIR = Path(__file__).resolve().parent / ".sp_judgement_status"
 JUDGEMENT_STATUS_INDEX = JUDGEMENT_STATUS_DIR / "status_index.json"
-JUDGEMENT_CACHE_VERSION = "sp-app-direct-bridge-v48-20260703-remove-mfg-source-pages"
+JUDGEMENT_CACHE_VERSION = "sp-app-direct-bridge-v52-20260705-satisfied-word-status"
 
 
 # ============================================================

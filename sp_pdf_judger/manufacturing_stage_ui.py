@@ -482,6 +482,42 @@ def _render_albumin_source_material_pages(result: ProcessingResult) -> str:
 
 
 def _evaluation_status_key(evaluation: Any) -> str:
+    reason = clean_text(_get(evaluation, "reason", ""))
+    if not reason:
+        reason = clean_text(_get(evaluation, "judgement_reason", ""))
+
+    reason_compact = re.sub(r"\s+", "", reason)
+
+    failed_reason_tokens = (
+        "\uac80\uc218\ubd88\ud569\uaca9",
+        "\ubd88\ud569\uaca9\uc73c\ub85c\ud310\ub2e8",
+        "\uac80\uc218\ubd88\ucda9\uc871",
+        "\ubd88\ucda9\uc871\uc73c\ub85c\ud310\ub2e8",
+        "\ubd88\ucda9\uc871\uc785\ub2c8\ub2e4",
+        "\ubd88\ucda9\uc871\ucc98\ub9ac",
+    )
+    passed_reason_tokens = (
+        "\uac80\uc218\ud569\uaca9",
+        "\ud569\uaca9\uc73c\ub85c\ud310\ub2e8",
+        "\uac80\uc218\ucda9\uc871",
+        "\ucda9\uc871\uc73c\ub85c\ud310\ub2e8",
+        "\ucda9\uc871\uc785\ub2c8\ub2e4",
+        "\ucda9\uc871\ucc98\ub9ac",
+    )
+    held_reason_tokens = (
+        "\uac80\uc218\ubcf4\ub958",
+        "\ubcf4\ub958\ub85c\ud310\ub2e8",
+    )
+
+    if any(token in reason_compact for token in failed_reason_tokens):
+        return "failed"
+
+    if any(token in reason_compact for token in passed_reason_tokens) and not any(token in reason_compact for token in failed_reason_tokens):
+        return "passed"
+
+    if any(token in reason_compact for token in held_reason_tokens):
+        return "held"
+
     status = clean_text(_get(evaluation, "final_status", ""))
 
     if not status:
@@ -491,29 +527,17 @@ def _evaluation_status_key(evaluation: Any) -> str:
         status = clean_text(_get(evaluation, "judgement", ""))
 
     s = status.casefold()
+    failed_status_tokens = ("\ubd88\ud569\uaca9", "\ubd88\ucda9\uc871", "\ubd80\uc801\ud569")
+    passed_status_tokens = ("\ud569\uaca9", "\ucda9\uc871", "\uc801\ud569")
+    held_status_tokens = ("\ubcf4\ub958", "\ud310\ub2e8")
 
-    if "불합격" in status or "부적합" in status or "fail" in s:
+    if any(token in status for token in failed_status_tokens) or "fail" in s:
         return "failed"
 
-    if "보류" in status or "판단" in status or "hold" in s:
+    if any(token in status for token in held_status_tokens) or "hold" in s:
         return "held"
 
-    if "합격" in status or "적합" in status or "pass" in s:
-        return "passed"
-
-    reason = clean_text(_get(evaluation, "reason", ""))
-    if not reason:
-        reason = clean_text(_get(evaluation, "judgement_reason", ""))
-
-    reason_compact = re.sub(r"\s+", "", reason)
-
-    if "검수불합격" in reason_compact or "불합격으로판단" in reason_compact:
-        return "failed"
-
-    if "검수보류" in reason_compact or "보류로판단" in reason_compact:
-        return "held"
-
-    if "검수합격" in reason_compact or ("합격으로판단" in reason_compact and "불합격" not in reason_compact):
+    if (any(token in status for token in passed_status_tokens) or "pass" in s) and not any(token in status for token in failed_status_tokens):
         return "passed"
 
     return ""
@@ -811,6 +835,9 @@ def _build_stage_test_summary_map(result: ProcessingResult) -> dict[str, dict]:
             if lot_judgements:
                 for row in lot_judgements:
                     row_status_key = _evaluation_status_key(row)
+                    row_reason = clean_text(_get(row, "reason", "")) or clean_text(_get(row, "judgement_reason", ""))
+                    if not row_reason and status_key in {"failed", "passed"}:
+                        row_status_key = status_key
                     if not row_status_key:
                         row_status_key = status_key
                     out[stage_key][row_status_key] += 1

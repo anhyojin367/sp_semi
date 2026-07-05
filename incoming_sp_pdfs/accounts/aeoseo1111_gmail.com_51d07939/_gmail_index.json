@@ -210,40 +210,44 @@
       "related_permit_files": []
     },
     "7000b2653df96a25be7151b1377cd869bcab4427045298a470d675b473899fa0": {
-      "file": "20260702_194811_[중간보고회] 스카이코비원멀티주 더미데이터-제조번호 오류.pdf",
+      "file": "20260705_183741_[중간보고회] 스카이코비원멀티주 더미데이터-제조번호 오류.pdf",
       "original_name": "[중간보고회] 스카이코비원멀티주 더미데이터-제조번호 오류.pdf",
       "attachment_type": "sp",
       "size_bytes": 461272,
       "sha256": "7000b2653df96a25be7151b1377cd869bcab4427045298a470d675b473899fa0",
       "subject": "[식약처] 스카이코비원멀티주 제조번호 오류 케이스",
-      "message_id": "<CA+kfR7ywRB-WfXJvYzdVyzWf+Ytfoiqd7PNEjhMhy-tfC6ynGQ@mail.gmail.com>",
-      "message_id_header": "<CA+kfR7ywRB-WfXJvYzdVyzWf+Ytfoiqd7PNEjhMhy-tfC6ynGQ@mail.gmail.com>",
-      "gmail_uid": "2326",
-      "raw_message_digest": "5c9979d7982e9626faeac5fe087efdcdd24d55c6336b0ab6372fe7bac1b4804b",
-      "attachment_index": 1,
-      "received_at": "2026-07-02T19:48:11+09:00",
+      "message_id": "<CA+kfR7waN+XALWn_Xi1-2yaJGNEWkdiSOuSwLqFRexeV7aE9HQ@mail.gmail.com>",
+      "message_id_header": "<CA+kfR7waN+XALWn_Xi1-2yaJGNEWkdiSOuSwLqFRexeV7aE9HQ@mail.gmail.com>",
+      "gmail_uid": "2331",
+      "raw_message_digest": "bec807f96bacfc02483383a4633e19b9302ce7afed6c5497fb076a505dfc325f",
+      "attachment_index": 2,
+      "received_at": "2026-07-05T18:37:41+09:00",
       "subject_keyword": "[식약처]",
       "account_address": "aeoseo1111@gmail.com",
       "related_sp_files": [],
-      "related_permit_files": []
+      "related_permit_files": [
+        "20260705_183741_스카이코비원멀티주_허가서.pdf"
+      ]
     },
     "7e4ff02b78ee18d9a042a0b6025096c5770f9f4c8e81b26aba2a8e40bdca7bd0": {
-      "file": "20260702_194742_[중간보고회] 스카이코비원멀티주 더미데이터_제조수량 오류.pdf",
+      "file": "20260705_200304_[중간보고회] 스카이코비원멀티주 더미데이터_제조수량 오류.pdf",
       "original_name": "[중간보고회] 스카이코비원멀티주 더미데이터_제조수량 오류.pdf",
       "attachment_type": "sp",
       "size_bytes": 461474,
       "sha256": "7e4ff02b78ee18d9a042a0b6025096c5770f9f4c8e81b26aba2a8e40bdca7bd0",
-      "subject": "[식약처] 스카이코비원멀티주 제조수량 오류 케이스",
-      "message_id": "<CA+kfR7yTMmYET5SRp+WDPhwuxDt4kt8X4yJuoV3Cyn65oYmaow@mail.gmail.com>",
-      "message_id_header": "<CA+kfR7yTMmYET5SRp+WDPhwuxDt4kt8X4yJuoV3Cyn65oYmaow@mail.gmail.com>",
-      "gmail_uid": "2325",
-      "raw_message_digest": "6547a2cdfeeaa9929eaffd5f3d95812ceba8c55602f9e94a62ab9c77535a50ea",
-      "attachment_index": 1,
-      "received_at": "2026-07-02T19:47:42+09:00",
+      "subject": "[식약처]스카이코비원멀티주_제조량오류",
+      "message_id": "<CA+kfR7zTR8_dQF=z+DQ4CXt5z9pwpXA9KekVczD4+khy3oe8Sw@mail.gmail.com>",
+      "message_id_header": "<CA+kfR7zTR8_dQF=z+DQ4CXt5z9pwpXA9KekVczD4+khy3oe8Sw@mail.gmail.com>",
+      "gmail_uid": "2336",
+      "raw_message_digest": "2b4b04381a7837ed168ccd46996eaf4d4982555440fdfb92c78879f41f79411a",
+      "attachment_index": 2,
+      "received_at": "2026-07-05T20:03:04+09:00",
       "subject_keyword": "[식약처]",
       "account_address": "aeoseo1111@gmail.com",
       "related_sp_files": [],
-      "related_permit_files": []
+      "related_permit_files": [
+        "20260705_200304_스카이코비원멀티주_허가서.pdf"
+      ]
     },
     "0c9ebe86f1b66496ea10704fca37bf4e01ec78ec4b066441c49472a56f8e15ae": {
       "file": "20260702_194716_[중간보고회] 스카이코비원멀티주 더미데이터_제조년월일오류.pdf",
@@ -258,6 +262,156 @@
       "raw_message_digest": "4cfd122e2c80716325fc4dd9aa48422c17b8d8f0b39e97bbb79e2692614dc46d",
       "attachment_index": 1,
       "received_at": "2026-07-02T19:47:16+09:00",
+      "subject_keyword": "[식약처]",
+      "account_address": "aeoseo1111@gmail.com",
+      "related_sp_files": [],
+      "related_permit_files": []
+    },
+    "6ec71a04c29b18c1909bd91646ae654fe95b6ac19e7b491702c7092d718d8c12": {
+      "file": "20260705_200228_스카이코비원멀티주_허가서.pdf",
+      "original_name": "스카이코비원멀티주_허가서.pdf",
+      "attachment_type": "permit",
+      "size_bytes": 184889,
+      "sha256": "6ec71a04c29b18c1909bd91646ae654fe95b6ac19e7b491702c7092d718d8c12",
+      "subject": "[식약처] 스카이코비원멀티주_제조년월일오류",
+      "message_id": "<CA+kfR7x7A2HtC_QAkxWCdY=qtEV2-eKUewkwjuCdt1=3fds=Dw@mail.gmail.com>",
+      "message_id_header": "<CA+kfR7x7A2HtC_QAkxWCdY=qtEV2-eKUewkwjuCdt1=3fds=Dw@mail.gmail.com>",
+      "gmail_uid": "2335",
+      "raw_message_digest": "4569a5c1fc9e69bd02b947a8a9b86894773dbbd3e49c9c39f01c51175ddc0235",
+      "attachment_index": 1,
+      "received_at": "2026-07-05T20:02:28+09:00",
+      "subject_keyword": "[식약처]",
+      "account_address": "aeoseo1111@gmail.com",
+      "related_sp_files": [
+        "20260705_200228_[중간보고회] 스카이코비원멀티주 더미데이터_제조년월일오류.pdf"
+      ],
+      "related_permit_files": []
+    },
+    "9e4ca9c1f4099e07fc42aab280672a35b38308b843338f7756c399b9c7b663df": {
+      "file": "20260705_190142_[중간보고회] 알부민 더미데이터-제조일자, 제조번호, 제조수량, 제조량, 시험결과 오류_2.pdf",
+      "original_name": "[중간보고회]  알부민 더미데이터-제조일자, 제조번호, 제조수량, 제조량, 시험결과 오류.pdf",
+      "attachment_type": "sp",
+      "size_bytes": 544856,
+      "sha256": "9e4ca9c1f4099e07fc42aab280672a35b38308b843338f7756c399b9c7b663df",
+      "subject": "[식약처] 알부민 더미데이터 여러가지 오류",
+      "message_id": "<CA+kfR7y9WkS69=7f+X5PQDBpa4BaeiEwJD6eEsgEVnyQxN-WQA@mail.gmail.com>",
+      "message_id_header": "<CA+kfR7y9WkS69=7f+X5PQDBpa4BaeiEwJD6eEsgEVnyQxN-WQA@mail.gmail.com>",
+      "gmail_uid": "2332",
+      "raw_message_digest": "19f34e787940cd74f6ae48d02e8df747439dd8675bbe3d3db4085c8505c91cf9",
+      "attachment_index": 1,
+      "received_at": "2026-07-05T19:01:42+09:00",
+      "subject_keyword": "[식약처]",
+      "account_address": "aeoseo1111@gmail.com",
+      "related_sp_files": [],
+      "related_permit_files": []
+    },
+    "7d08f2ce77a8f3327c2bd90014c6468f43ad13da3957b37c0abeba1b6814a1cd": {
+      "file": "20260705_192112_[중간보고회] 스카이코비원멀티주 더미데이터_제조년월일, 시험결과 오류.pdf",
+      "original_name": "[중간보고회] 스카이코비원멀티주 더미데이터_제조년월일, 시험결과 오류.pdf",
+      "attachment_type": "sp",
+      "size_bytes": 463378,
+      "sha256": "7d08f2ce77a8f3327c2bd90014c6468f43ad13da3957b37c0abeba1b6814a1cd",
+      "subject": "[식약처] 스카이코비원멀티주 제조년월일 오류",
+      "message_id": "<CA+kfR7woEFnDu4ebv+oeHJh_MvCmjQAeT0K8G6EvOpnwb5-zFQ@mail.gmail.com>",
+      "message_id_header": "<CA+kfR7woEFnDu4ebv+oeHJh_MvCmjQAeT0K8G6EvOpnwb5-zFQ@mail.gmail.com>",
+      "gmail_uid": "2333",
+      "raw_message_digest": "0c74742e014b811af14d7492e77bf490651f77fdea1fde7ec3f5d2ab7fdafad0",
+      "attachment_index": 2,
+      "received_at": "2026-07-05T19:21:12+09:00",
+      "subject_keyword": "[식약처]",
+      "account_address": "aeoseo1111@gmail.com",
+      "related_sp_files": [],
+      "related_permit_files": [
+        "20260705_192112_스카이코비원멀티주_허가서.pdf"
+      ]
+    },
+    "17e78a1b2ab6a5afb3a82db7c3e669260d520b7c21668ed883a79d1f015d06e0": {
+      "file": "20260705_195108_[중간보고회] 알부민 더미데이터-많은 오류 케이스.pdf",
+      "original_name": "[중간보고회] 알부민 더미데이터-많은 오류 케이스.pdf",
+      "attachment_type": "sp",
+      "size_bytes": 544525,
+      "sha256": "17e78a1b2ab6a5afb3a82db7c3e669260d520b7c21668ed883a79d1f015d06e0",
+      "subject": "[식약처] 알부민 오류 케이스",
+      "message_id": "<CA+kfR7x7rRo6m44d2pmcF+Wx7vpSkuHtsJKzHxRgJJEMFyfm+Q@mail.gmail.com>",
+      "message_id_header": "<CA+kfR7x7rRo6m44d2pmcF+Wx7vpSkuHtsJKzHxRgJJEMFyfm+Q@mail.gmail.com>",
+      "gmail_uid": "2334",
+      "raw_message_digest": "8783304757dc71022a4fda1a11be0c49cff08a92078f663cd8e7addc3632a32e",
+      "attachment_index": 1,
+      "received_at": "2026-07-05T19:51:08+09:00",
+      "subject_keyword": "[식약처]",
+      "account_address": "aeoseo1111@gmail.com",
+      "related_sp_files": [],
+      "related_permit_files": []
+    },
+    "d16f46c05be281b24c05aa8a3a390b178531ea0f4cf40cdf5204f1db1b71284e": {
+      "file": "20260705_200228_[중간보고회] 스카이코비원멀티주 더미데이터_제조년월일오류.pdf",
+      "original_name": "[중간보고회] 스카이코비원멀티주 더미데이터_제조년월일오류.pdf",
+      "attachment_type": "sp",
+      "size_bytes": 463199,
+      "sha256": "d16f46c05be281b24c05aa8a3a390b178531ea0f4cf40cdf5204f1db1b71284e",
+      "subject": "[식약처] 스카이코비원멀티주_제조년월일오류",
+      "message_id": "<CA+kfR7x7A2HtC_QAkxWCdY=qtEV2-eKUewkwjuCdt1=3fds=Dw@mail.gmail.com>",
+      "message_id_header": "<CA+kfR7x7A2HtC_QAkxWCdY=qtEV2-eKUewkwjuCdt1=3fds=Dw@mail.gmail.com>",
+      "gmail_uid": "2335",
+      "raw_message_digest": "4569a5c1fc9e69bd02b947a8a9b86894773dbbd3e49c9c39f01c51175ddc0235",
+      "attachment_index": 2,
+      "received_at": "2026-07-05T20:02:28+09:00",
+      "subject_keyword": "[식약처]",
+      "account_address": "aeoseo1111@gmail.com",
+      "related_sp_files": [],
+      "related_permit_files": [
+        "20260705_200228_스카이코비원멀티주_허가서.pdf"
+      ]
+    },
+    "6e733c35d802b4da805197e2d09c0bd12ff18c28f8577f65659f222482f924e3": {
+      "file": "20260705_200356_[중간보고회] 알부민 더미데이터-오류 케이스.pdf",
+      "original_name": "[중간보고회]  알부민 더미데이터-오류 케이스.pdf",
+      "attachment_type": "sp",
+      "size_bytes": 542491,
+      "sha256": "6e733c35d802b4da805197e2d09c0bd12ff18c28f8577f65659f222482f924e3",
+      "subject": "[식약처]알부민주_모든 오류 케이스",
+      "message_id": "<CA+kfR7xUohzf_87DUo0xtu6AGvEeh86b0SbGObTi6ZsMtwDTUw@mail.gmail.com>",
+      "message_id_header": "<CA+kfR7xUohzf_87DUo0xtu6AGvEeh86b0SbGObTi6ZsMtwDTUw@mail.gmail.com>",
+      "gmail_uid": "2337",
+      "raw_message_digest": "cf0cc32ead6dc98906be676d5c6ca1898c38acabaecc6f5d79a950eebf377505",
+      "attachment_index": 1,
+      "received_at": "2026-07-05T20:03:56+09:00",
+      "subject_keyword": "[식약처]",
+      "account_address": "aeoseo1111@gmail.com",
+      "related_sp_files": [],
+      "related_permit_files": []
+    },
+    "191937100d04345bd83b40abebf827875d70fa17fe9af58b30f1fdb8bdb7c1d6": {
+      "file": "20260705_204058_[중간보고회] 알부민 더미데이터_모든오류케이스.pdf",
+      "original_name": "[중간보고회] 알부민 더미데이터_모든오류케이스.pdf",
+      "attachment_type": "sp",
+      "size_bytes": 540219,
+      "sha256": "191937100d04345bd83b40abebf827875d70fa17fe9af58b30f1fdb8bdb7c1d6",
+      "subject": "[식약처]알부민주_더미데이터_모든오류케이스",
+      "message_id": "<CA+kfR7y-d56FUweyOCWAwhtsmmOqgmDjZVdkV-26ZVQE3RDA8Q@mail.gmail.com>",
+      "message_id_header": "<CA+kfR7y-d56FUweyOCWAwhtsmmOqgmDjZVdkV-26ZVQE3RDA8Q@mail.gmail.com>",
+      "gmail_uid": "2338",
+      "raw_message_digest": "85fe127dd2b63937dabfd2fad57a1894948c1b0a2d5c4956816b8274dda2dd23",
+      "attachment_index": 1,
+      "received_at": "2026-07-05T20:40:58+09:00",
+      "subject_keyword": "[식약처]",
+      "account_address": "aeoseo1111@gmail.com",
+      "related_sp_files": [],
+      "related_permit_files": []
+    },
+    "5dd41c80b595a81c3ba36988cc9ac580096eecd6d439155c87c1276fd3a18046": {
+      "file": "20260705_204802_[중간보고회] 알부민 더미데이터.pdf",
+      "original_name": "[중간보고회] 알부민 더미데이터.pdf",
+      "attachment_type": "sp",
+      "size_bytes": 538715,
+      "sha256": "5dd41c80b595a81c3ba36988cc9ac580096eecd6d439155c87c1276fd3a18046",
+      "subject": "[식약처]알부민",
+      "message_id": "<CA+kfR7ycwsi9uoWXXyEGhjpwohe717yYMsw4c_mvVMWLNaco4w@mail.gmail.com>",
+      "message_id_header": "<CA+kfR7ycwsi9uoWXXyEGhjpwohe717yYMsw4c_mvVMWLNaco4w@mail.gmail.com>",
+      "gmail_uid": "2339",
+      "raw_message_digest": "1dc651da381c8a22f57bb6711524024fe5d949f4ec849d963f94b8c6f214a984",
+      "attachment_index": 1,
+      "received_at": "2026-07-05T20:48:02+09:00",
       "subject_keyword": "[식약처]",
       "account_address": "aeoseo1111@gmail.com",
       "related_sp_files": [],
@@ -592,6 +746,256 @@
       "account_address": "aeoseo1111@gmail.com",
       "related_sp_files": [],
       "related_permit_files": []
+    },
+    "20260705_183741_스카이코비원멀티주_허가서.pdf": {
+      "file": "20260705_183741_스카이코비원멀티주_허가서.pdf",
+      "original_name": "스카이코비원멀티주_허가서.pdf",
+      "attachment_type": "permit",
+      "size_bytes": 184889,
+      "sha256": "6ec71a04c29b18c1909bd91646ae654fe95b6ac19e7b491702c7092d718d8c12",
+      "subject": "[식약처] 스카이코비원멀티주 제조번호 오류 케이스",
+      "message_id": "<CA+kfR7waN+XALWn_Xi1-2yaJGNEWkdiSOuSwLqFRexeV7aE9HQ@mail.gmail.com>",
+      "message_id_header": "<CA+kfR7waN+XALWn_Xi1-2yaJGNEWkdiSOuSwLqFRexeV7aE9HQ@mail.gmail.com>",
+      "gmail_uid": "2331",
+      "raw_message_digest": "bec807f96bacfc02483383a4633e19b9302ce7afed6c5497fb076a505dfc325f",
+      "attachment_index": 1,
+      "received_at": "2026-07-05T18:37:41+09:00",
+      "subject_keyword": "[식약처]",
+      "account_address": "aeoseo1111@gmail.com",
+      "related_sp_files": [
+        "20260705_183741_[중간보고회] 스카이코비원멀티주 더미데이터-제조번호 오류.pdf"
+      ],
+      "related_permit_files": []
+    },
+    "20260705_183741_[중간보고회] 스카이코비원멀티주 더미데이터-제조번호 오류.pdf": {
+      "file": "20260705_183741_[중간보고회] 스카이코비원멀티주 더미데이터-제조번호 오류.pdf",
+      "original_name": "[중간보고회] 스카이코비원멀티주 더미데이터-제조번호 오류.pdf",
+      "attachment_type": "sp",
+      "size_bytes": 461272,
+      "sha256": "7000b2653df96a25be7151b1377cd869bcab4427045298a470d675b473899fa0",
+      "subject": "[식약처] 스카이코비원멀티주 제조번호 오류 케이스",
+      "message_id": "<CA+kfR7waN+XALWn_Xi1-2yaJGNEWkdiSOuSwLqFRexeV7aE9HQ@mail.gmail.com>",
+      "message_id_header": "<CA+kfR7waN+XALWn_Xi1-2yaJGNEWkdiSOuSwLqFRexeV7aE9HQ@mail.gmail.com>",
+      "gmail_uid": "2331",
+      "raw_message_digest": "bec807f96bacfc02483383a4633e19b9302ce7afed6c5497fb076a505dfc325f",
+      "attachment_index": 2,
+      "received_at": "2026-07-05T18:37:41+09:00",
+      "subject_keyword": "[식약처]",
+      "account_address": "aeoseo1111@gmail.com",
+      "related_sp_files": [],
+      "related_permit_files": [
+        "20260705_183741_스카이코비원멀티주_허가서.pdf"
+      ]
+    },
+    "20260705_190142_[중간보고회] 알부민 더미데이터-제조일자, 제조번호, 제조수량, 제조량, 시험결과 오류_2.pdf": {
+      "file": "20260705_190142_[중간보고회] 알부민 더미데이터-제조일자, 제조번호, 제조수량, 제조량, 시험결과 오류_2.pdf",
+      "original_name": "[중간보고회]  알부민 더미데이터-제조일자, 제조번호, 제조수량, 제조량, 시험결과 오류.pdf",
+      "attachment_type": "sp",
+      "size_bytes": 544856,
+      "sha256": "9e4ca9c1f4099e07fc42aab280672a35b38308b843338f7756c399b9c7b663df",
+      "subject": "[식약처] 알부민 더미데이터 여러가지 오류",
+      "message_id": "<CA+kfR7y9WkS69=7f+X5PQDBpa4BaeiEwJD6eEsgEVnyQxN-WQA@mail.gmail.com>",
+      "message_id_header": "<CA+kfR7y9WkS69=7f+X5PQDBpa4BaeiEwJD6eEsgEVnyQxN-WQA@mail.gmail.com>",
+      "gmail_uid": "2332",
+      "raw_message_digest": "19f34e787940cd74f6ae48d02e8df747439dd8675bbe3d3db4085c8505c91cf9",
+      "attachment_index": 1,
+      "received_at": "2026-07-05T19:01:42+09:00",
+      "subject_keyword": "[식약처]",
+      "account_address": "aeoseo1111@gmail.com",
+      "related_sp_files": [],
+      "related_permit_files": []
+    },
+    "20260705_192112_스카이코비원멀티주_허가서.pdf": {
+      "file": "20260705_192112_스카이코비원멀티주_허가서.pdf",
+      "original_name": "스카이코비원멀티주_허가서.pdf",
+      "attachment_type": "permit",
+      "size_bytes": 184889,
+      "sha256": "6ec71a04c29b18c1909bd91646ae654fe95b6ac19e7b491702c7092d718d8c12",
+      "subject": "[식약처] 스카이코비원멀티주 제조년월일 오류",
+      "message_id": "<CA+kfR7woEFnDu4ebv+oeHJh_MvCmjQAeT0K8G6EvOpnwb5-zFQ@mail.gmail.com>",
+      "message_id_header": "<CA+kfR7woEFnDu4ebv+oeHJh_MvCmjQAeT0K8G6EvOpnwb5-zFQ@mail.gmail.com>",
+      "gmail_uid": "2333",
+      "raw_message_digest": "0c74742e014b811af14d7492e77bf490651f77fdea1fde7ec3f5d2ab7fdafad0",
+      "attachment_index": 1,
+      "received_at": "2026-07-05T19:21:12+09:00",
+      "subject_keyword": "[식약처]",
+      "account_address": "aeoseo1111@gmail.com",
+      "related_sp_files": [
+        "20260705_192112_[중간보고회] 스카이코비원멀티주 더미데이터_제조년월일, 시험결과 오류.pdf"
+      ],
+      "related_permit_files": []
+    },
+    "20260705_192112_[중간보고회] 스카이코비원멀티주 더미데이터_제조년월일, 시험결과 오류.pdf": {
+      "file": "20260705_192112_[중간보고회] 스카이코비원멀티주 더미데이터_제조년월일, 시험결과 오류.pdf",
+      "original_name": "[중간보고회] 스카이코비원멀티주 더미데이터_제조년월일, 시험결과 오류.pdf",
+      "attachment_type": "sp",
+      "size_bytes": 463378,
+      "sha256": "7d08f2ce77a8f3327c2bd90014c6468f43ad13da3957b37c0abeba1b6814a1cd",
+      "subject": "[식약처] 스카이코비원멀티주 제조년월일 오류",
+      "message_id": "<CA+kfR7woEFnDu4ebv+oeHJh_MvCmjQAeT0K8G6EvOpnwb5-zFQ@mail.gmail.com>",
+      "message_id_header": "<CA+kfR7woEFnDu4ebv+oeHJh_MvCmjQAeT0K8G6EvOpnwb5-zFQ@mail.gmail.com>",
+      "gmail_uid": "2333",
+      "raw_message_digest": "0c74742e014b811af14d7492e77bf490651f77fdea1fde7ec3f5d2ab7fdafad0",
+      "attachment_index": 2,
+      "received_at": "2026-07-05T19:21:12+09:00",
+      "subject_keyword": "[식약처]",
+      "account_address": "aeoseo1111@gmail.com",
+      "related_sp_files": [],
+      "related_permit_files": [
+        "20260705_192112_스카이코비원멀티주_허가서.pdf"
+      ]
+    },
+    "20260705_195108_[중간보고회] 알부민 더미데이터-많은 오류 케이스.pdf": {
+      "file": "20260705_195108_[중간보고회] 알부민 더미데이터-많은 오류 케이스.pdf",
+      "original_name": "[중간보고회] 알부민 더미데이터-많은 오류 케이스.pdf",
+      "attachment_type": "sp",
+      "size_bytes": 544525,
+      "sha256": "17e78a1b2ab6a5afb3a82db7c3e669260d520b7c21668ed883a79d1f015d06e0",
+      "subject": "[식약처] 알부민 오류 케이스",
+      "message_id": "<CA+kfR7x7rRo6m44d2pmcF+Wx7vpSkuHtsJKzHxRgJJEMFyfm+Q@mail.gmail.com>",
+      "message_id_header": "<CA+kfR7x7rRo6m44d2pmcF+Wx7vpSkuHtsJKzHxRgJJEMFyfm+Q@mail.gmail.com>",
+      "gmail_uid": "2334",
+      "raw_message_digest": "8783304757dc71022a4fda1a11be0c49cff08a92078f663cd8e7addc3632a32e",
+      "attachment_index": 1,
+      "received_at": "2026-07-05T19:51:08+09:00",
+      "subject_keyword": "[식약처]",
+      "account_address": "aeoseo1111@gmail.com",
+      "related_sp_files": [],
+      "related_permit_files": []
+    },
+    "20260705_200304_스카이코비원멀티주_허가서.pdf": {
+      "file": "20260705_200304_스카이코비원멀티주_허가서.pdf",
+      "original_name": "스카이코비원멀티주_허가서.pdf",
+      "attachment_type": "permit",
+      "size_bytes": 184889,
+      "sha256": "6ec71a04c29b18c1909bd91646ae654fe95b6ac19e7b491702c7092d718d8c12",
+      "subject": "[식약처]스카이코비원멀티주_제조량오류",
+      "message_id": "<CA+kfR7zTR8_dQF=z+DQ4CXt5z9pwpXA9KekVczD4+khy3oe8Sw@mail.gmail.com>",
+      "message_id_header": "<CA+kfR7zTR8_dQF=z+DQ4CXt5z9pwpXA9KekVczD4+khy3oe8Sw@mail.gmail.com>",
+      "gmail_uid": "2336",
+      "raw_message_digest": "2b4b04381a7837ed168ccd46996eaf4d4982555440fdfb92c78879f41f79411a",
+      "attachment_index": 1,
+      "received_at": "2026-07-05T20:03:04+09:00",
+      "subject_keyword": "[식약처]",
+      "account_address": "aeoseo1111@gmail.com",
+      "related_sp_files": [
+        "20260705_200304_[중간보고회] 스카이코비원멀티주 더미데이터_제조수량 오류.pdf"
+      ],
+      "related_permit_files": []
+    },
+    "20260705_200304_[중간보고회] 스카이코비원멀티주 더미데이터_제조수량 오류.pdf": {
+      "file": "20260705_200304_[중간보고회] 스카이코비원멀티주 더미데이터_제조수량 오류.pdf",
+      "original_name": "[중간보고회] 스카이코비원멀티주 더미데이터_제조수량 오류.pdf",
+      "attachment_type": "sp",
+      "size_bytes": 461474,
+      "sha256": "7e4ff02b78ee18d9a042a0b6025096c5770f9f4c8e81b26aba2a8e40bdca7bd0",
+      "subject": "[식약처]스카이코비원멀티주_제조량오류",
+      "message_id": "<CA+kfR7zTR8_dQF=z+DQ4CXt5z9pwpXA9KekVczD4+khy3oe8Sw@mail.gmail.com>",
+      "message_id_header": "<CA+kfR7zTR8_dQF=z+DQ4CXt5z9pwpXA9KekVczD4+khy3oe8Sw@mail.gmail.com>",
+      "gmail_uid": "2336",
+      "raw_message_digest": "2b4b04381a7837ed168ccd46996eaf4d4982555440fdfb92c78879f41f79411a",
+      "attachment_index": 2,
+      "received_at": "2026-07-05T20:03:04+09:00",
+      "subject_keyword": "[식약처]",
+      "account_address": "aeoseo1111@gmail.com",
+      "related_sp_files": [],
+      "related_permit_files": [
+        "20260705_200304_스카이코비원멀티주_허가서.pdf"
+      ]
+    },
+    "20260705_200228_스카이코비원멀티주_허가서.pdf": {
+      "file": "20260705_200228_스카이코비원멀티주_허가서.pdf",
+      "original_name": "스카이코비원멀티주_허가서.pdf",
+      "attachment_type": "permit",
+      "size_bytes": 184889,
+      "sha256": "6ec71a04c29b18c1909bd91646ae654fe95b6ac19e7b491702c7092d718d8c12",
+      "subject": "[식약처] 스카이코비원멀티주_제조년월일오류",
+      "message_id": "<CA+kfR7x7A2HtC_QAkxWCdY=qtEV2-eKUewkwjuCdt1=3fds=Dw@mail.gmail.com>",
+      "message_id_header": "<CA+kfR7x7A2HtC_QAkxWCdY=qtEV2-eKUewkwjuCdt1=3fds=Dw@mail.gmail.com>",
+      "gmail_uid": "2335",
+      "raw_message_digest": "4569a5c1fc9e69bd02b947a8a9b86894773dbbd3e49c9c39f01c51175ddc0235",
+      "attachment_index": 1,
+      "received_at": "2026-07-05T20:02:28+09:00",
+      "subject_keyword": "[식약처]",
+      "account_address": "aeoseo1111@gmail.com",
+      "related_sp_files": [
+        "20260705_200228_[중간보고회] 스카이코비원멀티주 더미데이터_제조년월일오류.pdf"
+      ],
+      "related_permit_files": []
+    },
+    "20260705_200228_[중간보고회] 스카이코비원멀티주 더미데이터_제조년월일오류.pdf": {
+      "file": "20260705_200228_[중간보고회] 스카이코비원멀티주 더미데이터_제조년월일오류.pdf",
+      "original_name": "[중간보고회] 스카이코비원멀티주 더미데이터_제조년월일오류.pdf",
+      "attachment_type": "sp",
+      "size_bytes": 463199,
+      "sha256": "d16f46c05be281b24c05aa8a3a390b178531ea0f4cf40cdf5204f1db1b71284e",
+      "subject": "[식약처] 스카이코비원멀티주_제조년월일오류",
+      "message_id": "<CA+kfR7x7A2HtC_QAkxWCdY=qtEV2-eKUewkwjuCdt1=3fds=Dw@mail.gmail.com>",
+      "message_id_header": "<CA+kfR7x7A2HtC_QAkxWCdY=qtEV2-eKUewkwjuCdt1=3fds=Dw@mail.gmail.com>",
+      "gmail_uid": "2335",
+      "raw_message_digest": "4569a5c1fc9e69bd02b947a8a9b86894773dbbd3e49c9c39f01c51175ddc0235",
+      "attachment_index": 2,
+      "received_at": "2026-07-05T20:02:28+09:00",
+      "subject_keyword": "[식약처]",
+      "account_address": "aeoseo1111@gmail.com",
+      "related_sp_files": [],
+      "related_permit_files": [
+        "20260705_200228_스카이코비원멀티주_허가서.pdf"
+      ]
+    },
+    "20260705_200356_[중간보고회] 알부민 더미데이터-오류 케이스.pdf": {
+      "file": "20260705_200356_[중간보고회] 알부민 더미데이터-오류 케이스.pdf",
+      "original_name": "[중간보고회]  알부민 더미데이터-오류 케이스.pdf",
+      "attachment_type": "sp",
+      "size_bytes": 542491,
+      "sha256": "6e733c35d802b4da805197e2d09c0bd12ff18c28f8577f65659f222482f924e3",
+      "subject": "[식약처]알부민주_모든 오류 케이스",
+      "message_id": "<CA+kfR7xUohzf_87DUo0xtu6AGvEeh86b0SbGObTi6ZsMtwDTUw@mail.gmail.com>",
+      "message_id_header": "<CA+kfR7xUohzf_87DUo0xtu6AGvEeh86b0SbGObTi6ZsMtwDTUw@mail.gmail.com>",
+      "gmail_uid": "2337",
+      "raw_message_digest": "cf0cc32ead6dc98906be676d5c6ca1898c38acabaecc6f5d79a950eebf377505",
+      "attachment_index": 1,
+      "received_at": "2026-07-05T20:03:56+09:00",
+      "subject_keyword": "[식약처]",
+      "account_address": "aeoseo1111@gmail.com",
+      "related_sp_files": [],
+      "related_permit_files": []
+    },
+    "20260705_204058_[중간보고회] 알부민 더미데이터_모든오류케이스.pdf": {
+      "file": "20260705_204058_[중간보고회] 알부민 더미데이터_모든오류케이스.pdf",
+      "original_name": "[중간보고회] 알부민 더미데이터_모든오류케이스.pdf",
+      "attachment_type": "sp",
+      "size_bytes": 540219,
+      "sha256": "191937100d04345bd83b40abebf827875d70fa17fe9af58b30f1fdb8bdb7c1d6",
+      "subject": "[식약처]알부민주_더미데이터_모든오류케이스",
+      "message_id": "<CA+kfR7y-d56FUweyOCWAwhtsmmOqgmDjZVdkV-26ZVQE3RDA8Q@mail.gmail.com>",
+      "message_id_header": "<CA+kfR7y-d56FUweyOCWAwhtsmmOqgmDjZVdkV-26ZVQE3RDA8Q@mail.gmail.com>",
+      "gmail_uid": "2338",
+      "raw_message_digest": "85fe127dd2b63937dabfd2fad57a1894948c1b0a2d5c4956816b8274dda2dd23",
+      "attachment_index": 1,
+      "received_at": "2026-07-05T20:40:58+09:00",
+      "subject_keyword": "[식약처]",
+      "account_address": "aeoseo1111@gmail.com",
+      "related_sp_files": [],
+      "related_permit_files": []
+    },
+    "20260705_204802_[중간보고회] 알부민 더미데이터.pdf": {
+      "file": "20260705_204802_[중간보고회] 알부민 더미데이터.pdf",
+      "original_name": "[중간보고회] 알부민 더미데이터.pdf",
+      "attachment_type": "sp",
+      "size_bytes": 538715,
+      "sha256": "5dd41c80b595a81c3ba36988cc9ac580096eecd6d439155c87c1276fd3a18046",
+      "subject": "[식약처]알부민",
+      "message_id": "<CA+kfR7ycwsi9uoWXXyEGhjpwohe717yYMsw4c_mvVMWLNaco4w@mail.gmail.com>",
+      "message_id_header": "<CA+kfR7ycwsi9uoWXXyEGhjpwohe717yYMsw4c_mvVMWLNaco4w@mail.gmail.com>",
+      "gmail_uid": "2339",
+      "raw_message_digest": "1dc651da381c8a22f57bb6711524024fe5d949f4ec849d963f94b8c6f214a984",
+      "attachment_index": 1,
+      "received_at": "2026-07-05T20:48:02+09:00",
+      "subject_keyword": "[식약처]",
+      "account_address": "aeoseo1111@gmail.com",
+      "related_sp_files": [],
+      "related_permit_files": []
     }
   },
   "uid_attachments": {
@@ -713,6 +1117,104 @@
       "attachment_index": 1,
       "original_name": "[중간보고회] 스카이코비원멀티주 더미데이터_제조년월일오류.pdf",
       "sha256": "0c9ebe86f1b66496ea10704fca37bf4e01ec78ec4b066441c49472a56f8e15ae"
+    },
+    "b409e9e6d6b898b1766f049d69128803dd68e093": {
+      "file": "20260705_183741_스카이코비원멀티주_허가서.pdf",
+      "gmail_uid": "2331",
+      "attachment_index": 1,
+      "original_name": "스카이코비원멀티주_허가서.pdf",
+      "sha256": "6ec71a04c29b18c1909bd91646ae654fe95b6ac19e7b491702c7092d718d8c12"
+    },
+    "97adc84c045d9437e8cfb54c21e38a180c2be122": {
+      "file": "20260705_183741_[중간보고회] 스카이코비원멀티주 더미데이터-제조번호 오류.pdf",
+      "gmail_uid": "2331",
+      "attachment_index": 2,
+      "original_name": "[중간보고회] 스카이코비원멀티주 더미데이터-제조번호 오류.pdf",
+      "sha256": "7000b2653df96a25be7151b1377cd869bcab4427045298a470d675b473899fa0"
+    },
+    "a01c24b83d5742a8f4d9fd4c1dbc2ea3ba88a05f": {
+      "file": "20260705_190142_[중간보고회] 알부민 더미데이터-제조일자, 제조번호, 제조수량, 제조량, 시험결과 오류_2.pdf",
+      "gmail_uid": "2332",
+      "attachment_index": 1,
+      "original_name": "[중간보고회]  알부민 더미데이터-제조일자, 제조번호, 제조수량, 제조량, 시험결과 오류.pdf",
+      "sha256": "9e4ca9c1f4099e07fc42aab280672a35b38308b843338f7756c399b9c7b663df"
+    },
+    "a28455a8637f0725ca1a0e9ba6ed57588a71daa2": {
+      "file": "20260705_192112_스카이코비원멀티주_허가서.pdf",
+      "gmail_uid": "2333",
+      "attachment_index": 1,
+      "original_name": "스카이코비원멀티주_허가서.pdf",
+      "sha256": "6ec71a04c29b18c1909bd91646ae654fe95b6ac19e7b491702c7092d718d8c12"
+    },
+    "88bc0995fceaaeb7ac5412025271b2dc63ddcd89": {
+      "file": "20260705_192112_[중간보고회] 스카이코비원멀티주 더미데이터_제조년월일, 시험결과 오류.pdf",
+      "gmail_uid": "2333",
+      "attachment_index": 2,
+      "original_name": "[중간보고회] 스카이코비원멀티주 더미데이터_제조년월일, 시험결과 오류.pdf",
+      "sha256": "7d08f2ce77a8f3327c2bd90014c6468f43ad13da3957b37c0abeba1b6814a1cd"
+    },
+    "8df81522943402d7228d285acdcbca1e6c824e5c": {
+      "file": "20260705_195108_[중간보고회] 알부민 더미데이터-많은 오류 케이스.pdf",
+      "gmail_uid": "2334",
+      "attachment_index": 1,
+      "original_name": "[중간보고회] 알부민 더미데이터-많은 오류 케이스.pdf",
+      "sha256": "17e78a1b2ab6a5afb3a82db7c3e669260d520b7c21668ed883a79d1f015d06e0"
+    },
+    "7c92d8ccc5fdd5593b42ef0a54bc8fcdcd082306": {
+      "file": "20260705_200304_스카이코비원멀티주_허가서.pdf",
+      "gmail_uid": "2336",
+      "attachment_index": 1,
+      "original_name": "스카이코비원멀티주_허가서.pdf",
+      "sha256": "6ec71a04c29b18c1909bd91646ae654fe95b6ac19e7b491702c7092d718d8c12"
+    },
+    "e8e26795878bd243e68215f1752ae93cb76d0309": {
+      "file": "20260705_200304_[중간보고회] 스카이코비원멀티주 더미데이터_제조수량 오류.pdf",
+      "gmail_uid": "2336",
+      "attachment_index": 2,
+      "original_name": "[중간보고회] 스카이코비원멀티주 더미데이터_제조수량 오류.pdf",
+      "sha256": "7e4ff02b78ee18d9a042a0b6025096c5770f9f4c8e81b26aba2a8e40bdca7bd0"
+    },
+    "f4238fc3c40ae77c7bcfaeadb0f920fc2a7d9bf3": {
+      "file": "20260705_200228_스카이코비원멀티주_허가서.pdf",
+      "gmail_uid": "2335",
+      "attachment_index": 1,
+      "original_name": "스카이코비원멀티주_허가서.pdf",
+      "sha256": "6ec71a04c29b18c1909bd91646ae654fe95b6ac19e7b491702c7092d718d8c12"
+    },
+    "889a6d0ee7a430989770982bcddee2781473fa2a": {
+      "file": "20260705_200228_[중간보고회] 스카이코비원멀티주 더미데이터_제조년월일오류.pdf",
+      "gmail_uid": "2335",
+      "attachment_index": 2,
+      "original_name": "[중간보고회] 스카이코비원멀티주 더미데이터_제조년월일오류.pdf",
+      "sha256": "d16f46c05be281b24c05aa8a3a390b178531ea0f4cf40cdf5204f1db1b71284e"
+    },
+    "46fa5e71acc9e5022991f2405f8c7eff77cbbf97": {
+      "file": "20260705_200356_[중간보고회] 알부민 더미데이터-오류 케이스.pdf",
+      "gmail_uid": "2337",
+      "attachment_index": 1,
+      "original_name": "[중간보고회]  알부민 더미데이터-오류 케이스.pdf",
+      "sha256": "6e733c35d802b4da805197e2d09c0bd12ff18c28f8577f65659f222482f924e3"
+    },
+    "1d94bc2e9542bbbd34467fa19c931559c0e51a23": {
+      "file": "20260705_204058_[중간보고회] 알부민 더미데이터_모든오류케이스.pdf",
+      "gmail_uid": "2338",
+      "attachment_index": 1,
+      "original_name": "[중간보고회] 알부민 더미데이터_모든오류케이스.pdf",
+      "sha256": "191937100d04345bd83b40abebf827875d70fa17fe9af58b30f1fdb8bdb7c1d6"
+    },
+    "72fd8746b347bdf066b70bebbf07b8ec4a894e93": {
+      "file": "20260705_204802_[중간보고회] 알부민 더미데이터.pdf",
+      "gmail_uid": "2339",
+      "attachment_index": 1,
+      "original_name": "[중간보고회] 알부민 더미데이터.pdf",
+      "sha256": "5dd41c80b595a81c3ba36988cc9ac580096eecd6d439155c87c1276fd3a18046"
+    },
+    "234b62c3b6437c911d5fe79b7edaf09897cc76d5": {
+      "file": "20260705_214525_[중간보고회] 알부민 더미데이터-모든오류케이스.pdf",
+      "gmail_uid": "2340",
+      "attachment_index": 1,
+      "original_name": "[중간보고회] 알부민 더미데이터-모든오류케이스.pdf",
+      "sha256": "02b612d3ac4670d4c14a6eeebfd14e1004ad0a64c015fcc2d7e4fe439e387a2f"
     }
   },
   "checked_uids": {
@@ -1363,6 +1865,86 @@
       "search": "SINCE 01-Jan-2026",
       "subject_keyword": "[식약처]",
       "checked_at": "2026-07-05T14:48:48.431890"
+    },
+    "2384fa6936e064ac423bb8316fe8cfcb89da6dc7": {
+      "gmail_uid": "2331",
+      "status": "checked",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-07-05T18:51:08.931675"
+    },
+    "9ace8a6aed79a758d11265d27d20c4477a20cf82": {
+      "gmail_uid": "2332",
+      "status": "checked",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-07-05T19:02:11.039590"
+    },
+    "5cc306faa985f038c3fd489719b1398b77f8e01f": {
+      "gmail_uid": "2333",
+      "status": "checked",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-07-05T19:21:35.550369"
+    },
+    "212f33a1366c13b71fdb4da8fcadc48820b373f8": {
+      "gmail_uid": "2334",
+      "status": "checked",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-07-05T19:51:29.550377"
+    },
+    "a48a9514111754a4efd8be8b10048328c025e2a6": {
+      "gmail_uid": "2336",
+      "status": "checked",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-07-05T20:04:13.209247"
+    },
+    "6b8a63a00581023a5142057d1c6cf6b74982f6d0": {
+      "gmail_uid": "2335",
+      "status": "checked",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-07-05T20:04:14.374149"
+    },
+    "73f31d56e9e1da47e58e8d6be7ce4454a5fbf149": {
+      "gmail_uid": "2337",
+      "status": "checked",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-07-05T20:04:17.974063"
+    },
+    "76020288af90f8a6c728acd3ba611fe923d2a896": {
+      "gmail_uid": "2338",
+      "status": "checked",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-07-05T20:41:31.247013"
+    },
+    "04386ce3d2d4be0b8b50ae83bb4964b361928521": {
+      "gmail_uid": "2339",
+      "status": "checked",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-07-05T20:48:34.754902"
+    },
+    "c6c3c571cb554b22866ff7f7daced612b02e6581": {
+      "gmail_uid": "2340",
+      "status": "checked",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "checked_at": "2026-07-05T21:45:49.349462"
     }
   }
 }

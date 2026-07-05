@@ -95,6 +95,47 @@ def _status_to_csv_text(status: str | None) -> str:
     return status
 
 
+def _status_from_explicit_reason(status: str | None, reason: str | None = None) -> str | None:
+    reason_text = clean_text(reason or "")
+
+    if not reason_text:
+        return status
+
+    compact = re.sub(r"\s+", "", reason_text)
+
+    failed_tokens = (
+        "\uac80\uc218\ubd88\ud569\uaca9",
+        "\ubd88\ud569\uaca9\uc73c\ub85c\ud310\ub2e8",
+        "\uac80\uc218\ubd88\ucda9\uc871",
+        "\ubd88\ucda9\uc871\uc73c\ub85c\ud310\ub2e8",
+        "\ubd88\ucda9\uc871\uc785\ub2c8\ub2e4",
+        "\ubd88\ucda9\uc871\ucc98\ub9ac",
+    )
+    passed_tokens = (
+        "\uac80\uc218\ud569\uaca9",
+        "\ud569\uaca9\uc73c\ub85c\ud310\ub2e8",
+        "\uac80\uc218\ucda9\uc871",
+        "\ucda9\uc871\uc73c\ub85c\ud310\ub2e8",
+        "\ucda9\uc871\uc785\ub2c8\ub2e4",
+        "\ucda9\uc871\ucc98\ub9ac",
+    )
+    held_tokens = (
+        "\uac80\uc218\ubcf4\ub958",
+        "\ubcf4\ub958\ub85c\ud310\ub2e8",
+    )
+
+    if any(token in compact for token in failed_tokens):
+        return FAIL_LABEL
+
+    if any(token in compact for token in passed_tokens) and not any(token in compact for token in failed_tokens):
+        return PASS_LABEL
+
+    if any(token in compact for token in held_tokens):
+        return HOLD_LABEL
+
+    return status
+
+
 def _evaluation_to_rows(evaluation: Evaluation) -> list[dict[str, str]]:
     test_name = clean_text(getattr(evaluation, "test_name", ""))
     method = clean_text(getattr(evaluation, "method", ""))
@@ -128,7 +169,9 @@ def _evaluation_to_rows(evaluation: Evaluation) -> list[dict[str, str]]:
                     "시험 기준": criteria,
                     "시험 기간": clean_text(item.get("test_date", "")) or base_period,
                     "시험 결과": clean_text(item.get("result", "")),
-                    "검수 결과": _status_to_csv_text(item.get("status", "")),
+                    "검수 결과": _status_to_csv_text(
+                        _status_from_explicit_reason(item.get("status", ""), item.get("reason", ""))
+                    ),
                 }
             )
 
@@ -141,7 +184,9 @@ def _evaluation_to_rows(evaluation: Evaluation) -> list[dict[str, str]]:
             "시험 기준": criteria,
             "시험 기간": base_period,
             "시험 결과": clean_text(getattr(evaluation, "result", "")),
-            "검수 결과": _status_to_csv_text(getattr(evaluation, "final_status", "")),
+            "검수 결과": _status_to_csv_text(
+                _status_from_explicit_reason(getattr(evaluation, "final_status", ""), getattr(evaluation, "reason", ""))
+            ),
         }
     ]
 
@@ -153,10 +198,16 @@ def _summary_row(stage_name: str, evaluations: list[Evaluation]) -> dict[str, st
 
     for ev in evaluations:
         lot_judgements = list(getattr(ev, "lot_judgements", []) or [])
+        parent_status = clean_text(
+            _status_from_explicit_reason(getattr(ev, "final_status", None), getattr(ev, "reason", ""))
+        )
 
         if lot_judgements:
             for item in lot_judgements:
-                status = clean_text(item.get("status", ""))
+                status = clean_text(_status_from_explicit_reason(item.get("status", ""), item.get("reason", "")))
+                item_reason = clean_text(item.get("reason", "") or item.get("judgement_reason", ""))
+                if not item_reason and parent_status in {PASS_LABEL, FAIL_LABEL}:
+                    status = parent_status
 
                 if status == PASS_LABEL:
                     passed += 1
@@ -167,7 +218,7 @@ def _summary_row(stage_name: str, evaluations: list[Evaluation]) -> dict[str, st
 
             continue
 
-        status = getattr(ev, "final_status", None)
+        status = _status_from_explicit_reason(getattr(ev, "final_status", None), getattr(ev, "reason", ""))
 
         if status == PASS_LABEL:
             passed += 1

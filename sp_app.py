@@ -33,8 +33,8 @@ DEFAULT_GMAIL_SINCE = date(2026, 1, 1)
 GMAIL_CONFIRMATION_VERSION = "manual-gmail-confirm-20260602-v2"
 JUDGEMENT_STATUS_DIR = Path(__file__).resolve().parent / ".sp_judgement_status"
 JUDGEMENT_STATUS_INDEX = JUDGEMENT_STATUS_DIR / "status_index.json"
-APP_CACHE_VERSION = "sp-ui-cache-v82-20260705-manufacturing-quantity-only"
-JUDGEMENT_STATUS_CACHE_VERSION = "sp-app-direct-bridge-v48-20260703-remove-mfg-source-pages"
+APP_CACHE_VERSION = "sp-ui-cache-v86-20260705-satisfied-word-status"
+JUDGEMENT_STATUS_CACHE_VERSION = "sp-app-direct-bridge-v52-20260705-satisfied-word-status"
 
 
 def _ensure_current_cache_version() -> None:

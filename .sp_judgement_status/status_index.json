@@ -480,6 +480,214 @@
       "summary_before_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\cbb2bf6dd6c04d974c91fdce\\summary_before.csv",
       "summary_after_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\cbb2bf6dd6c04d974c91fdce\\summary_after.csv",
       "permit_paths": []
+    },
+    "2f41d6bed5d483825152a08894292bb867b9c6e3cd93bd60f75e9d99d70e87ef": {
+      "status": "completed",
+      "cache_version": "sp-app-direct-bridge-v48-20260703-remove-mfg-source-pages",
+      "artifact_key": "d8d354e7ed08351f1bde6fd6",
+      "pdf_path": "incoming_sp_pdfs\\accounts\\aeoseo1111_gmail.com_51d07939\\20260705_183741_[중간보고회] 스카이코비원멀티주 더미데이터-제조번호 오류.pdf",
+      "pdf_sig": {
+        "size": 461272,
+        "mtime_ns": 1783245068931675500
+      },
+      "updated_at": "2026-07-05T18:53:39",
+      "summary_counts": {
+        "pass": 95,
+        "fail": 0,
+        "hold": 0,
+        "total": 95
+      },
+      "summary_before_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\d8d354e7ed08351f1bde6fd6\\summary_before.csv",
+      "summary_after_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\d8d354e7ed08351f1bde6fd6\\summary_after.csv",
+      "permit_paths": [
+        "incoming_sp_pdfs\\accounts\\aeoseo1111_gmail.com_51d07939\\20260705_183741_스카이코비원멀티주_허가서.pdf"
+      ]
+    },
+    "75377aeceadedb1b761d548261a09950da963df021b167ffbef12c057227efd5": {
+      "status": "completed",
+      "cache_version": "sp-app-direct-bridge-v48-20260703-remove-mfg-source-pages",
+      "artifact_key": "7b528043b649dcb805cef777",
+      "pdf_path": "incoming_sp_pdfs\\accounts\\aeoseo1111_gmail.com_51d07939\\20260705_192112_[중간보고회] 스카이코비원멀티주 더미데이터_제조년월일, 시험결과 오류.pdf",
+      "pdf_sig": {
+        "size": 463378,
+        "mtime_ns": 1783246895550369000
+      },
+      "updated_at": "2026-07-05T19:28:49",
+      "summary_counts": {
+        "pass": 94,
+        "fail": 1,
+        "hold": 0,
+        "total": 95
+      },
+      "summary_before_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\7b528043b649dcb805cef777\\summary_before.csv",
+      "summary_after_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\7b528043b649dcb805cef777\\summary_after.csv",
+      "permit_paths": [
+        "incoming_sp_pdfs\\accounts\\aeoseo1111_gmail.com_51d07939\\20260705_192112_스카이코비원멀티주_허가서.pdf"
+      ]
+    },
+    "c41395f3920d83831089ac60c47c2b88456a62a9a16a2c41fcced27b435ea5a5": {
+      "status": "completed",
+      "cache_version": "sp-app-direct-bridge-v48-20260703-remove-mfg-source-pages",
+      "artifact_key": "6f5db05f141435f4fb91a427",
+      "pdf_path": "incoming_sp_pdfs\\accounts\\aeoseo1111_gmail.com_51d07939\\20260705_190142_[중간보고회] 알부민 더미데이터-제조일자, 제조번호, 제조수량, 제조량, 시험결과 오류_2.pdf",
+      "pdf_sig": {
+        "size": 544856,
+        "mtime_ns": 1783245731039590600
+      },
+      "updated_at": "2026-07-05T19:31:53",
+      "summary_counts": {
+        "pass": 35,
+        "fail": 4,
+        "hold": 18,
+        "total": 57
+      },
+      "summary_before_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\6f5db05f141435f4fb91a427\\summary_before.csv",
+      "summary_after_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\6f5db05f141435f4fb91a427\\summary_after.csv",
+      "permit_paths": []
+    },
+    "5c21abe96b5c593018684c41259b1bb85e4e02d67c28528bfc32c77678c40903": {
+      "status": "completed",
+      "cache_version": "sp-app-direct-bridge-v48-20260703-remove-mfg-source-pages",
+      "artifact_key": "1fec38adfc13fbc4fab10bc9",
+      "pdf_path": "incoming_sp_pdfs\\accounts\\aeoseo1111_gmail.com_51d07939\\20260705_195108_[중간보고회] 알부민 더미데이터-많은 오류 케이스.pdf",
+      "pdf_sig": {
+        "size": 544525,
+        "mtime_ns": 1783248689550377800
+      },
+      "updated_at": "2026-07-05T20:04:01",
+      "summary_counts": {
+        "pass": 33,
+        "fail": 5,
+        "hold": 18,
+        "total": 56
+      },
+      "summary_before_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\1fec38adfc13fbc4fab10bc9\\summary_before.csv",
+      "summary_after_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\1fec38adfc13fbc4fab10bc9\\summary_after.csv",
+      "permit_paths": []
+    },
+    "4d97ace526c56ea5905f8704dedbbef673d479fff894851fd611497b66bc533a": {
+      "status": "completed",
+      "cache_version": "sp-app-direct-bridge-v48-20260703-remove-mfg-source-pages",
+      "artifact_key": "3d0d0a5f29a79d7e69d5efc2",
+      "pdf_path": "incoming_sp_pdfs\\accounts\\aeoseo1111_gmail.com_51d07939\\20260705_200356_[중간보고회] 알부민 더미데이터-오류 케이스.pdf",
+      "pdf_sig": {
+        "size": 542491,
+        "mtime_ns": 1783249457974063500
+      },
+      "updated_at": "2026-07-05T20:41:02",
+      "summary_counts": {
+        "pass": 32,
+        "fail": 5,
+        "hold": 18,
+        "total": 55
+      },
+      "summary_before_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\3d0d0a5f29a79d7e69d5efc2\\summary_before.csv",
+      "summary_after_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\3d0d0a5f29a79d7e69d5efc2\\summary_after.csv",
+      "permit_paths": []
+    },
+    "221e322dc0faa7bba4b2b0c086ddc31758571751a6dd8487eaffcc5e60ed0107": {
+      "status": "completed",
+      "cache_version": "sp-app-direct-bridge-v48-20260703-remove-mfg-source-pages",
+      "artifact_key": "f3ba4e833b7f3501cd56edb2",
+      "pdf_path": "incoming_sp_pdfs\\accounts\\aeoseo1111_gmail.com_51d07939\\20260705_204058_[중간보고회] 알부민 더미데이터_모든오류케이스.pdf",
+      "pdf_sig": {
+        "size": 540219,
+        "mtime_ns": 1783251691247013500
+      },
+      "updated_at": "2026-07-05T20:48:04",
+      "summary_counts": {
+        "pass": 32,
+        "fail": 5,
+        "hold": 18,
+        "total": 55
+      },
+      "summary_before_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\f3ba4e833b7f3501cd56edb2\\summary_before.csv",
+      "summary_after_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\f3ba4e833b7f3501cd56edb2\\summary_after.csv",
+      "permit_paths": []
+    },
+    "304a8b303924b72e9d77c52eca64ed1aaa58cddf67db96e8eddfc41523f08b5a": {
+      "status": "completed",
+      "cache_version": "sp-app-direct-bridge-v52-20260705-satisfied-word-status",
+      "artifact_key": "7abd463de5a914db406c2ee9",
+      "pdf_path": "incoming_sp_pdfs\\accounts\\aeoseo1111_gmail.com_51d07939\\20260705_204802_[중간보고회] 알부민 더미데이터.pdf",
+      "pdf_sig": {
+        "size": 538715,
+        "mtime_ns": 1783252114754902600
+      },
+      "updated_at": "2026-07-05T21:54:21",
+      "summary_counts": {
+        "pass": 31,
+        "fail": 5,
+        "hold": 18,
+        "total": 54
+      },
+      "summary_before_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\7abd463de5a914db406c2ee9\\summary_before.csv",
+      "summary_after_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\7abd463de5a914db406c2ee9\\summary_after.csv",
+      "permit_paths": []
+    },
+    "2d7057b0c0f1ebcdb7377f125d0ebfe864781919751eb3d89c1f3832a54a393d": {
+      "status": "completed",
+      "cache_version": "sp-app-direct-bridge-v48-20260703-remove-mfg-source-pages",
+      "artifact_key": "0b7f70b83a718beaef41c1ee",
+      "pdf_path": "incoming_sp_pdfs\\accounts\\aeoseo1111_gmail.com_51d07939\\20260705_200304_[중간보고회] 스카이코비원멀티주 더미데이터_제조수량 오류.pdf",
+      "pdf_sig": {
+        "size": 461474,
+        "mtime_ns": 1783249453200249300
+      },
+      "updated_at": "2026-07-05T20:59:51",
+      "summary_counts": {
+        "pass": 95,
+        "fail": 0,
+        "hold": 0,
+        "total": 95
+      },
+      "summary_before_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\0b7f70b83a718beaef41c1ee\\summary_before.csv",
+      "summary_after_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\0b7f70b83a718beaef41c1ee\\summary_after.csv",
+      "permit_paths": [
+        "incoming_sp_pdfs\\accounts\\aeoseo1111_gmail.com_51d07939\\20260705_200304_스카이코비원멀티주_허가서.pdf"
+      ]
+    },
+    "803050409428a667c174e030243f73e49567880a6eb6ef469d668e89934f1781": {
+      "status": "completed",
+      "cache_version": "sp-app-direct-bridge-v48-20260703-remove-mfg-source-pages",
+      "artifact_key": "5e91d6bfab2f9f1b42577eb2",
+      "pdf_path": "incoming_sp_pdfs\\accounts\\aeoseo1111_gmail.com_51d07939\\20260705_200228_[중간보고회] 스카이코비원멀티주 더미데이터_제조년월일오류.pdf",
+      "pdf_sig": {
+        "size": 463199,
+        "mtime_ns": 1783249454350225400
+      },
+      "updated_at": "2026-07-05T21:02:51",
+      "summary_counts": {
+        "pass": 95,
+        "fail": 0,
+        "hold": 0,
+        "total": 95
+      },
+      "summary_before_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\5e91d6bfab2f9f1b42577eb2\\summary_before.csv",
+      "summary_after_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\5e91d6bfab2f9f1b42577eb2\\summary_after.csv",
+      "permit_paths": [
+        "incoming_sp_pdfs\\accounts\\aeoseo1111_gmail.com_51d07939\\20260705_200228_스카이코비원멀티주_허가서.pdf"
+      ]
+    },
+    "2c4e73e1cbac83e0fe4f008beba053727b92e5674b8124fc23aae0af03be2d71": {
+      "status": "completed",
+      "cache_version": "sp-app-direct-bridge-v52-20260705-satisfied-word-status",
+      "artifact_key": "80a2ac5803e24438ddbc113c",
+      "pdf_path": "incoming_sp_pdfs\\accounts\\aeoseo1111_gmail.com_51d07939\\20260705_214525_[중간보고회] 알부민 더미데이터-모든오류케이스.pdf",
+      "pdf_sig": {
+        "size": 559529,
+        "mtime_ns": 1783255549349462800
+      },
+      "updated_at": "2026-07-05T21:52:24",
+      "summary_counts": {
+        "pass": 30,
+        "fail": 5,
+        "hold": 19,
+        "total": 54
+      },
+      "summary_before_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\80a2ac5803e24438ddbc113c\\summary_before.csv",
+      "summary_after_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\80a2ac5803e24438ddbc113c\\summary_after.csv",
+      "permit_paths": []
     }
   }
 }
