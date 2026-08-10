@@ -1,84 +1,97 @@
 {
-  "created_at": "2026-07-05T21:45:55.832848",
+  "created_at": "2026-08-10T13:12:59.197836",
   "rows": [
     {
-      "uid": "2340",
+      "uid": "2396",
+      "message_id": "<CA+kfR7wG+LQWNzM84HaN3ZbY6VdH_xhTUYCsZhyo7xnAmZuC1A@mail.gmail.com>",
+      "message_key": "<CA+kfR7wG+LQWNzM84HaN3ZbY6VdH_xhTUYCsZhyo7xnAmZuC1A@mail.gmail.com>",
+      "subject": "[식약처] 제조년월일,날짜선행관계오류 더미데이터",
+      "received_at": "2026-08-10T13:12:36+09:00",
+      "mailbox": "INBOX",
+      "search": "SINCE 01-Jan-2026",
+      "subject_keyword": "[식약처]",
+      "status": "saved",
+      "file": "20260810_131236_[중간보고회] 스카이코비원멀티주 더미데이터_날짜선행관계,제조년월일오류_2.pdf",
+      "attachment_name": "[중간보고회] 스카이코비원멀티주 더미데이터_날짜선행관계,제조년월일오류.pdf",
+      "attachment_index": 1,
+      "attachment_type": "sp",
+      "sha256": "eb8fac49067d196d19a1d69bc9a7511d599735bda79066da0ed8ab2446f043bb",
+      "size_bytes": 463227
+    },
+    {
+      "uid": "2395",
       "status": "uid_already_checked"
     },
     {
-      "uid": "2339",
+      "uid": "2394",
       "status": "uid_already_checked"
     },
     {
-      "uid": "2338",
+      "uid": "2393",
       "status": "uid_already_checked"
     },
     {
-      "uid": "2337",
+      "uid": "2392",
       "status": "uid_already_checked"
     },
     {
-      "uid": "2336",
+      "uid": "2391",
       "status": "uid_already_checked"
     },
     {
-      "uid": "2335",
+      "uid": "2390",
       "status": "uid_already_checked"
     },
     {
-      "uid": "2334",
+      "uid": "2389",
       "status": "uid_already_checked"
     },
     {
-      "uid": "2333",
+      "uid": "2388",
       "status": "uid_already_checked"
     },
     {
-      "uid": "2332",
+      "uid": "2387",
       "status": "uid_already_checked"
     },
     {
-      "uid": "2331",
+      "uid": "2386",
       "status": "uid_already_checked"
     },
     {
-      "uid": "2330",
+      "uid": "2385",
       "status": "uid_already_checked"
     },
     {
-      "uid": "2329",
+      "uid": "2384",
       "status": "uid_already_checked"
     },
     {
-      "uid": "2328",
+      "uid": "2383",
       "status": "uid_already_checked"
     },
     {
-      "uid": "2327",
+      "uid": "2382",
       "status": "uid_already_checked"
     },
     {
-      "uid": "2326",
+      "uid": "2381",
       "status": "uid_already_checked"
     },
     {
-      "uid": "2325",
+      "uid": "2380",
       "status": "uid_already_checked"
     },
     {
-      "uid": "2324",
+      "uid": "2379",
       "status": "uid_already_checked"
     },
     {
-      "uid": "2323",
+      "uid": "2378",
       "status": "uid_already_checked"
     },
     {
-      "uid": "2322",
-      "status": "uid_already_checked"
-    },
-    {
-      "uid": "2321",
+      "uid": "2377",
       "status": "uid_already_checked"
     }
   ]

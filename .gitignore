@@ -17,3 +17,7 @@ venv/
 *.log
 dist/
 build/
+
+OUTPUT/*.xlsx
+OUTPUT/rule_regression_index.json
+!OUTPUT/README.md

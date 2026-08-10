@@ -26,7 +26,12 @@ class JudgeResponse(BaseModel):
 
 
 class GeminiJudgeClient:
-    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        model: Optional[str] = None,
+        domain_detail_context: str | None = None,
+    ) -> None:
         # Streamlit이 이미 떠 있는 상태에서 .env를 바꿔도 새 판정 시점에는 다시 읽는다.
         load_dotenv(Path(BASE_DIR) / ".env", override=True)
         load_dotenv(override=True)
@@ -43,12 +48,16 @@ class GeminiJudgeClient:
         self.call_count = 0
         self.success_count = 0
         self.last_error = ""
+        self.domain_detail_context = clean_text(domain_detail_context)
         if self.enabled:
             try:
                 self.client = genai.Client(api_key=self.api_key)
             except Exception as exc:
                 self.enabled = False
                 self.last_error = f"Gemini client init failed: {exc}"
+
+    def set_domain_detail_context(self, context: str | None) -> None:
+        self.domain_detail_context = clean_text(context)
 
     def explain(
         self,
@@ -64,6 +73,7 @@ class GeminiJudgeClient:
             return None
 
         rag_text = "\n".join(f"- {clean_text(x)}" for x in rag_contexts if clean_text(x)) or "- 없음"
+        domain_detail_text = self.domain_detail_context or "- 적용 가능한 추가 디테일 없음"
 
         if forced_status:
             task = (
@@ -82,6 +92,10 @@ class GeminiJudgeClient:
 {task}
 
 판정 원칙:
+- 아래의 전체 디테일, 회사 디테일, 제품 디테일이 제공되면 세 계층을 모두 확인한다.
+- 회사/제품 디테일은 전체 디테일에 추가되는 점검 항목이다. 더 구체적인 계층이 있다는 이유로 전체 디테일을 생략하지 않는다.
+- 현재 SP 문서의 명시적 시험기준·시험결과, 허가서, 결정적 판정 근거가 최우선이다. 디테일 문서는 누락 점검과 문맥 해석을 돕는 참고 지침이며 문서에 없는 값이나 결과를 만들어 내는 근거가 아니다.
+- 디테일 문서와 현재 SP/허가서의 명시적 내용이 충돌하면 현재 SP/허가서와 결정적 판정 근거를 우선한다.
 - 숫자와 실제 단위를 우선 비교한다.
 - 숫자 뒤에 붙은 설명어(예: 백색도성상, 용출률확인, 삼투압, 성상, 확인, 시험명 일부)는 비교 단위가 아니라 부가 설명일 수 있다.
 - 따라서 "100.0%용출률확인"은 "100.0%"와 같은 값으로 볼 수 있다.
@@ -124,6 +138,9 @@ class GeminiJudgeClient:
 
 참고 근거:
 {rag_text}
+
+적용 디테일 계층:
+{domain_detail_text}
 """.strip()
 
         try:

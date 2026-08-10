@@ -217,25 +217,32 @@
     },
     "0583d4dce288aaac91812c4f6d29b0eadaab5a058225e220b614021233f44d54": {
       "status": "completed",
-      "cache_version": "sp-app-direct-bridge-v34-20260624-rag-data-unified-judge",
-      "artifact_key": "f289e7e8733b6b1d35cbf1a5",
+      "cache_version": "sp-app-direct-bridge-v53-20260729-domain-details",
+      "artifact_key": "b0b8194832fbc6b8fe7a67a5",
       "pdf_path": "incoming_sp_pdfs\\accounts\\aeoseo1111_gmail.com_51d07939\\20260630_021532_[중간보고회] 스카이코비원멀티주 더미데이터_ 제조일자, 제조수량, 로트번호 오류_시험결과_적합기재.pdf",
       "pdf_sig": {
         "size": 463763,
         "mtime_ns": 1782753366678377600
       },
-      "updated_at": "2026-06-30T02:19:59",
+      "updated_at": "2026-08-05T16:31:35",
       "summary_counts": {
         "pass": 95,
         "fail": 0,
         "hold": 0,
         "total": 95
       },
-      "summary_before_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\f289e7e8733b6b1d35cbf1a5\\summary_before.csv",
-      "summary_after_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\f289e7e8733b6b1d35cbf1a5\\summary_after.csv",
+      "summary_before_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\b0b8194832fbc6b8fe7a67a5\\summary_before.csv",
+      "summary_after_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\b0b8194832fbc6b8fe7a67a5\\summary_after.csv",
       "permit_paths": [
         "incoming_sp_pdfs\\accounts\\aeoseo1111_gmail.com_51d07939\\20260630_021532_스카이코비원멀티주_허가서1.pdf",
         "incoming_sp_pdfs\\accounts\\aeoseo1111_gmail.com_51d07939\\20260630_021532_스카이코비원멀티주_허가서2.pdf"
+      ],
+      "company": "동국바이오사이언스",
+      "product": "스카이코비원멀티주",
+      "detail_fingerprint": "a05b236aa6afe87022345bdd",
+      "detail_sources": [
+        "overall.md",
+        "products/sky_covione.md"
       ]
     },
     "855520f5b211e2da3d3c99d28b1e6a3abd739a941974f3e9c00e5d81123add9a": {
@@ -607,23 +614,31 @@
     },
     "304a8b303924b72e9d77c52eca64ed1aaa58cddf67db96e8eddfc41523f08b5a": {
       "status": "completed",
-      "cache_version": "sp-app-direct-bridge-v52-20260705-satisfied-word-status",
-      "artifact_key": "7abd463de5a914db406c2ee9",
+      "cache_version": "sp-app-direct-bridge-v53-20260729-domain-details",
+      "artifact_key": "1637bb478b5db147dba3f386",
       "pdf_path": "incoming_sp_pdfs\\accounts\\aeoseo1111_gmail.com_51d07939\\20260705_204802_[중간보고회] 알부민 더미데이터.pdf",
       "pdf_sig": {
         "size": 538715,
         "mtime_ns": 1783252114754902600
       },
-      "updated_at": "2026-07-05T21:54:21",
+      "updated_at": "2026-08-05T19:56:33",
       "summary_counts": {
         "pass": 31,
         "fail": 5,
         "hold": 18,
         "total": 54
       },
-      "summary_before_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\7abd463de5a914db406c2ee9\\summary_before.csv",
-      "summary_after_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\7abd463de5a914db406c2ee9\\summary_after.csv",
-      "permit_paths": []
+      "summary_before_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\1637bb478b5db147dba3f386\\summary_before.csv",
+      "summary_after_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\1637bb478b5db147dba3f386\\summary_after.csv",
+      "permit_paths": [],
+      "company": "동국플라즈마",
+      "product": "동국알부민20%주",
+      "detail_fingerprint": "a2205c5c358090329f12cc42",
+      "detail_sources": [
+        "overall.md",
+        "companies/dongkook_plasma.md",
+        "products/albumin.md"
+      ]
     },
     "2d7057b0c0f1ebcdb7377f125d0ebfe864781919751eb3d89c1f3832a54a393d": {
       "status": "completed",
@@ -688,6 +703,60 @@
       "summary_before_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\80a2ac5803e24438ddbc113c\\summary_before.csv",
       "summary_after_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\80a2ac5803e24438ddbc113c\\summary_after.csv",
       "permit_paths": []
+    },
+    "0cb644cd169e7b80091b3d60528c396821c7da6963d2b5f75876b486959f9cea": {
+      "status": "completed",
+      "cache_version": "sp-app-direct-bridge-v53-20260729-domain-details",
+      "artifact_key": "07ddc87bdc8d9497ca6eecd0",
+      "pdf_path": "incoming_sp_pdfs\\accounts\\aeoseo1111_gmail.com_51d07939\\20260810_130401_[중간보고회] 스카이코비원멀티주 더미데이터_날짜 선행관계,제조년월일오류.pdf",
+      "pdf_sig": {
+        "size": 463175,
+        "mtime_ns": 1786334664114834700
+      },
+      "updated_at": "2026-08-10T13:06:00",
+      "summary_counts": {
+        "pass": 95,
+        "fail": 0,
+        "hold": 0,
+        "total": 95
+      },
+      "summary_before_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\07ddc87bdc8d9497ca6eecd0\\summary_before.csv",
+      "summary_after_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\07ddc87bdc8d9497ca6eecd0\\summary_after.csv",
+      "permit_paths": [],
+      "company": "동국바이오사이언스",
+      "product": "스카이코비원멀티주",
+      "detail_fingerprint": "a05b236aa6afe87022345bdd",
+      "detail_sources": [
+        "overall.md",
+        "products/sky_covione.md"
+      ]
+    },
+    "87a9c8f5bd3464e6e0c8742df009641e605cc732bb7389b2539796aecc020e79": {
+      "status": "completed",
+      "cache_version": "sp-app-direct-bridge-v53-20260729-domain-details",
+      "artifact_key": "5287812d30da0fe9c4ce05bf",
+      "pdf_path": "incoming_sp_pdfs\\accounts\\aeoseo1111_gmail.com_51d07939\\20260810_131236_[중간보고회] 스카이코비원멀티주 더미데이터_날짜선행관계,제조년월일오류_2.pdf",
+      "pdf_sig": {
+        "size": 463227,
+        "mtime_ns": 1786335178943345500
+      },
+      "updated_at": "2026-08-10T13:14:35",
+      "summary_counts": {
+        "pass": 95,
+        "fail": 0,
+        "hold": 0,
+        "total": 95
+      },
+      "summary_before_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\5287812d30da0fe9c4ce05bf\\summary_before.csv",
+      "summary_after_path": "C:\\Users\\User\\Desktop\\SP_main (3)\\SP_main\\sp_main\\.sp_judgement_status\\5287812d30da0fe9c4ce05bf\\summary_after.csv",
+      "permit_paths": [],
+      "company": "동국바이오사이언스",
+      "product": "스카이코비원멀티주",
+      "detail_fingerprint": "a05b236aa6afe87022345bdd",
+      "detail_sources": [
+        "overall.md",
+        "products/sky_covione.md"
+      ]
     }
   }
 }

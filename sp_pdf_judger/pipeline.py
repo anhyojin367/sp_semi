@@ -11,6 +11,7 @@ from pathlib import Path
 import fitz
 
 from .config import FAIL_LABEL, HOLD_LABEL, PASS_LABEL
+from .domain_details import DomainDetailProfile, DomainDetailStore
 from .extractor import extract_records
 from .hierarchy import build_document_tree
 from .judgement import JudgeEngine
@@ -815,15 +816,50 @@ def _count_evaluation_statuses(evaluations):
 
 
 class DocumentJudgePipeline:
-    def __init__(self, permit_pdf_paths: list[Path] | None = None) -> None:
+    def __init__(
+        self,
+        permit_pdf_paths: list[Path] | None = None,
+        *,
+        company: str | None = None,
+        product: str | None = None,
+        detail_store: DomainDetailStore | None = None,
+    ) -> None:
+        self.company = clean_text(company)
+        self.product = clean_text(product)
+        self.detail_store = detail_store or DomainDetailStore()
+        self.detail_profile = self.detail_store.resolve(self.company, self.product)
         self.rag_store = UcumRagStore()
-        self.llm_client = GeminiJudgeClient()
+        self.llm_client = GeminiJudgeClient(
+            domain_detail_context=self.detail_profile.render_for_llm()
+        )
         self.permit_store = PermitPdfStore(permit_pdf_paths)
         self.judge_engine = JudgeEngine(
             self.rag_store,
             self.llm_client,
             permit_store=self.permit_store,
         )
+
+    def _activate_detail_profile(
+        self,
+        static_result: ProcessingResult | None,
+    ) -> DomainDetailProfile:
+        metadata = static_result.metadata if static_result is not None else {}
+        metadata = metadata if isinstance(metadata, dict) else {}
+        company = (
+            self.company
+            or clean_text(metadata.get("document_company"))
+            or clean_text(metadata.get("company"))
+        )
+        product = (
+            self.product
+            or clean_text(metadata.get("document_product"))
+            or clean_text(metadata.get("product"))
+        )
+        self.detail_profile = self.detail_store.resolve(company, product)
+        self.llm_client.set_domain_detail_context(
+            self.detail_profile.render_for_llm()
+        )
+        return self.detail_profile
 
     def run(
         self,
@@ -832,6 +868,7 @@ class DocumentJudgePipeline:
         extracted_records: list[ExtractedRecord] | None = None,
         static_result: ProcessingResult | None = None,
     ) -> ProcessingResult:
+        detail_profile = self._activate_detail_profile(static_result)
         work_dir = ensure_dir(Path(tempfile.gettempdir()) / "sp_pdf_judger_preview")
         artifact_stem = _pdf_artifact_stem(pdf_path)
 
@@ -938,6 +975,13 @@ class DocumentJudgePipeline:
                 "rag_sources": self.rag_store.loaded_sources,
                 "permit_pdf_count": len(self.permit_store.permit_pdf_paths),
                 "permit_chunk_count": len(self.permit_store.chunks),
+                "document_company": detail_profile.requested_company,
+                "document_product": detail_profile.requested_product,
+                "domain_detail_matched_company": detail_profile.matched_company,
+                "domain_detail_matched_product": detail_profile.matched_product,
+                "domain_detail_sources": detail_profile.sources,
+                "domain_detail_fingerprint": detail_profile.fingerprint,
+                "domain_detail_context": detail_profile.render_for_llm(),
                 "manufacturing_summary_page_numbers": manufacturing_page_numbers,
                 "manufacturing_summary_meta": manufacturing_meta,
             },

@@ -20,6 +20,7 @@ import streamlit.components.v1 as components
 
 from sp_gmail_ingest import DEFAULT_STORE_DIR, GmailConfig, download_gmail_sp_pdfs
 from sp_company_logos import find_company_logo
+from sp_pdf_judger.domain_details import resolve_domain_detail_profile
 from sp_flowchart_data import load_simulation_graph, simulation_graph_to_json
 from sp_sim2_viewer import build_simulation_html as build_sim2_html
 STORE_DIR = Path(os.getenv("SP_PDF_DIR", str(DEFAULT_STORE_DIR)))
@@ -33,8 +34,8 @@ DEFAULT_GMAIL_SINCE = date(2026, 1, 1)
 GMAIL_CONFIRMATION_VERSION = "manual-gmail-confirm-20260602-v2"
 JUDGEMENT_STATUS_DIR = Path(__file__).resolve().parent / ".sp_judgement_status"
 JUDGEMENT_STATUS_INDEX = JUDGEMENT_STATUS_DIR / "status_index.json"
-APP_CACHE_VERSION = "sp-ui-cache-v86-20260705-satisfied-word-status"
-JUDGEMENT_STATUS_CACHE_VERSION = "sp-app-direct-bridge-v52-20260705-satisfied-word-status"
+APP_CACHE_VERSION = "sp-ui-cache-v87-20260729-domain-details"
+JUDGEMENT_STATUS_CACHE_VERSION = "sp-app-direct-bridge-v53-20260729-domain-details"
 
 
 def _ensure_current_cache_version() -> None:
@@ -759,6 +760,8 @@ def _render_inline_simulation(product: str, pdf_path: Path | None = None) -> flo
                 pdf_path=pdf_path,
                 permit_paths=permit_paths,
                 original_csv_dir=Path(csv_dir),
+                company=str(getattr(selected_doc_for_judge, "company", "") or ""),
+                product=str(getattr(selected_doc_for_judge, "product", "") or ""),
             )
         except Exception as exc:
             st.warning(
@@ -824,6 +827,13 @@ def _cached_simulation_artifacts_for_doc(
 
     record = _status_record_for_doc(doc, _load_judgement_status_index())
     if not isinstance(record, dict) or record.get("status") != "completed":
+        return None
+
+    detail_profile = resolve_domain_detail_profile(
+        getattr(doc, "company", ""),
+        getattr(doc, "product", ""),
+    )
+    if str(record.get("detail_fingerprint") or "") != detail_profile.fingerprint:
         return None
 
     before_path, after_path = _summary_paths_from_status_record(record)

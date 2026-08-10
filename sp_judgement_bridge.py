@@ -18,6 +18,7 @@ from typing import Any
 import streamlit as st
 import streamlit.components.v1 as components
 
+from sp_pdf_judger.domain_details import resolve_domain_detail_profile
 from sp_pdf_judger.pipeline import DocumentJudgePipeline
 from sp_pdf_judger.stage_csv_exporter import (
     _is_albumin_document,
@@ -29,6 +30,10 @@ from sp_pdf_judger.manufacturing_stage_ui import (
     build_stage_info_cards,
     render_manufacturing_summary_with_stage_cards,
     summarize_stage_info_cards,
+)
+from sp_pdf_judger.rule_regression import (
+    append_rule_regression_log,
+    write_output_index,
 )
 from sp_pdf_judger.schemas import Summary
 from sp_pdf_judger.ui_html import (
@@ -42,7 +47,7 @@ JUDGE_COMPONENT_HEIGHT = 10000
 FINAL_JUDGEMENT_VIEWPORT_HEIGHT = 860
 JUDGEMENT_STATUS_DIR = Path(__file__).resolve().parent / ".sp_judgement_status"
 JUDGEMENT_STATUS_INDEX = JUDGEMENT_STATUS_DIR / "status_index.json"
-JUDGEMENT_CACHE_VERSION = "sp-app-direct-bridge-v52-20260705-satisfied-word-status"
+JUDGEMENT_CACHE_VERSION = "sp-app-direct-bridge-v53-20260729-domain-details"
 
 
 # ============================================================
@@ -66,6 +71,9 @@ def _artifact_key(
     pdf_path: Path,
     permit_paths: list[Path],
     original_csv_dir: Path | None,
+    company: str = "",
+    product: str = "",
+    detail_fingerprint: str = "",
 ) -> str:
     permit_sig = "::".join(_file_sig(path) for path in permit_paths) if permit_paths else "no_permit"
     csv_sig = _file_sig(original_csv_dir) if original_csv_dir else "no_csv_dir"
@@ -74,7 +82,8 @@ def _artifact_key(
         f"{JUDGEMENT_CACHE_VERSION}::"
         f"{_file_sig(pdf_path)}::"
         f"{permit_sig}::"
-        f"{csv_sig}"
+        f"{csv_sig}::"
+        f"{company.strip()}::{product.strip()}::{detail_fingerprint}"
     )
 
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
@@ -272,6 +281,10 @@ def _remember_judgement_artifacts(artifacts: dict[str, Any]) -> None:
         "summary_before_path": str(persisted_before),
         "summary_after_path": str(persisted_after),
         "permit_paths": [str(path) for path in artifacts.get("permit_paths", [])],
+        "company": str(artifacts.get("company") or ""),
+        "product": str(artifacts.get("product") or ""),
+        "detail_fingerprint": str(artifacts.get("detail_fingerprint") or ""),
+        "detail_sources": list(artifacts.get("detail_sources", []) or []),
     }
     _write_status_index(data)
 
@@ -896,11 +909,38 @@ def _prepare_runtime_simulation_csv_dir(
 # 판정 아티팩트 생성
 # ============================================================
 
+def _attach_rule_regression_log(artifacts: dict[str, Any]) -> dict[str, Any]:
+    """Persist a non-UI regression trace without changing judgement output."""
+    result = artifacts.get("after_result")
+    if result is None:
+        return artifacts
+
+    project_root = Path(__file__).resolve().parent
+    try:
+        logged = append_rule_regression_log(
+            result,
+            project_root=project_root,
+            permit_paths=artifacts.get("permit_paths", []),
+            summary_counts_path=artifacts.get("summary_after_path"),
+        )
+        artifacts["rule_regression_workbook_path"] = logged.workbook_path
+        artifacts["rule_regression_run_id"] = logged.run_id
+        artifacts["rule_regression_appended"] = logged.appended
+        artifacts.pop("rule_regression_error", None)
+        write_output_index(logged.workbook_path.parent)
+    except Exception as exc:
+        # Regression logging is observability only. It must never block judgement.
+        artifacts["rule_regression_error"] = f"{type(exc).__name__}: {exc}"
+    return artifacts
+
+
 def ensure_judgement_artifacts(
     *,
     pdf_path: Path,
     permit_paths: list[Path],
     original_csv_dir: Path | None,
+    company: str = "",
+    product: str = "",
 ) -> dict[str, Any]:
     """
     실제 sp_pdf_judger를 실행해서 before/after 판정 결과와 summary CSV를 만든다.
@@ -916,11 +956,22 @@ def ensure_judgement_artifacts(
     pdf_path = Path(pdf_path)
     permit_paths = [Path(path) for path in permit_paths if Path(path).exists()]
     original_csv_dir = Path(original_csv_dir) if original_csv_dir else None
+    company = str(company or "").strip()
+    product = str(product or "").strip()
+    detail_profile = resolve_domain_detail_profile(company, product)
 
-    key = _artifact_key(pdf_path, permit_paths, original_csv_dir)
+    key = _artifact_key(
+        pdf_path,
+        permit_paths,
+        original_csv_dir,
+        company,
+        product,
+        detail_profile.fingerprint,
+    )
     session_key = f"sp_direct_judgement_artifacts::{key}"
 
     if session_key in st.session_state:
+        _attach_rule_regression_log(st.session_state[session_key])
         _remember_judgement_artifacts(st.session_state[session_key])
         return st.session_state[session_key]
 
@@ -962,6 +1013,7 @@ def ensure_judgement_artifacts(
                 st.session_state[session_key] = artifacts
                 st.session_state["latest_judgement_artifact_key"] = key
                 st.session_state["latest_judgement_pdf_path"] = str(pdf_path)
+                _attach_rule_regression_log(artifacts)
                 _remember_judgement_artifacts(artifacts)
                 return artifacts
         except Exception:
@@ -970,11 +1022,19 @@ def ensure_judgement_artifacts(
     spinner_text = "문서 기준과 참고 근거를 대조해 판정 데이터를 생성하고 있습니다..."
 
     with st.spinner(spinner_text):
-        before_pipeline = DocumentJudgePipeline(permit_pdf_paths=[])
+        before_pipeline = DocumentJudgePipeline(
+            permit_pdf_paths=[],
+            company=company,
+            product=product,
+        )
         before_result = before_pipeline.run(pdf_path)
 
         if permit_paths:
-            after_pipeline = DocumentJudgePipeline(permit_pdf_paths=permit_paths)
+            after_pipeline = DocumentJudgePipeline(
+                permit_pdf_paths=permit_paths,
+                company=company,
+                product=product,
+            )
             after_result = after_pipeline.run(
                 pdf_path,
                 extracted_records=before_result.extracted_records,
@@ -1027,8 +1087,13 @@ def ensure_judgement_artifacts(
         "runtime_csv_dir": runtime_csv_dir,
         "pdf_path": pdf_path,
         "permit_paths": permit_paths,
+        "company": company,
+        "product": product,
+        "detail_fingerprint": detail_profile.fingerprint,
+        "detail_sources": detail_profile.sources,
     }
 
+    _attach_rule_regression_log(artifacts)
     st.session_state[session_key] = artifacts
     st.session_state["latest_judgement_artifact_key"] = key
     st.session_state["latest_judgement_pdf_path"] = str(pdf_path)
@@ -1650,6 +1715,8 @@ def render_final_judgement_page(
         pdf_path=pdf_path,
         permit_paths=permit_paths,
         original_csv_dir=Path(original_csv_dir) if original_csv_dir else None,
+        company=str(getattr(selected_doc, "company", "") or ""),
+        product=str(getattr(selected_doc, "product", "") or ""),
     )
     progress_slot.empty()
 

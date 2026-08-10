@@ -100,3 +100,25 @@ def _render_selected_pdf(pdf_path: Path) -> None:
 ## 공유 시 주의
 
 이 공유본에는 Gmail 비밀번호, 앱 비밀번호, 수신 PDF를 포함하지 않습니다. 각 사용자가 자기 Gmail 주소와 자기 앱 비밀번호를 입력해서 사용해야 합니다.
+
+## RAG 및 제약 디테일 운영
+
+현재 RAG의 데이터 흐름, 검색 방식, 데이터 추가 절차는 아래 문서를 참고합니다.
+
+- `docs/RAG_ARCHITECTURE_AND_DATA_GUIDE.md`
+- `docs/DOMAIN_DETAIL_AUTHORING_GUIDE.md`
+
+회사·제품별 검수 관점은 `sp_pdf_judger/domain_details` 아래의 Markdown으로 관리합니다. LLM 판정 요청에는 항상 공통 `overall.md`가 들어가며, 문서에서 인식한 회사와 제품에 맞는 회사·제품 Markdown이 추가로 병합됩니다.
+
+예:
+
+```text
+GC녹십자 + 녹십자-알부민주20%
+→ 전체 디테일 + GC녹십자 디테일 + 사람혈청알부민 디테일
+```
+
+선택 결과 확인:
+
+```powershell
+python -m sp_pdf_judger.domain_details --company "GC녹십자" --product "녹십자-알부민주20%" --show-context
+```
