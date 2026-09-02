@@ -13,13 +13,14 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from .config import DEFAULT_GEMINI_MODEL, GEMINI_API_KEY
+from .clova_client import create_clova_client, request_structured_response
+from .config import (
+    CLOVA_API_KEY,
+    CLOVA_BASE_URL,
+    CLOVA_MAX_COMPLETION_TOKENS,
+    DEFAULT_CLOVA_MODEL,
+)
 from .utils import clean_text
-
-try:
-    from google import genai
-except Exception:
-    genai = None
 
 
 @dataclass
@@ -1158,11 +1159,11 @@ class ManufacturingInfoLlmCompareResponse(BaseModel):
 
 
 def _get_mfg_llm_client():
-    if not GEMINI_API_KEY or genai is None:
+    if not CLOVA_API_KEY:
         return None
 
     try:
-        return genai.Client(api_key=GEMINI_API_KEY)
+        return create_clova_client(CLOVA_API_KEY, CLOVA_BASE_URL)
     except Exception:
         return None
 
@@ -1309,24 +1310,13 @@ JSON 본문 후보:
 """.strip()
 
     try:
-        response = client.models.generate_content(
-            model=DEFAULT_GEMINI_MODEL,
-            contents=prompt,
-            config={
-                "response_mime_type": "application/json",
-                "response_schema": ManufacturingInfoLlmExtractResponse,
-            },
+        data = request_structured_response(
+            client=client,
+            model=DEFAULT_CLOVA_MODEL,
+            prompt=prompt,
+            response_model=ManufacturingInfoLlmExtractResponse,
+            max_completion_tokens=CLOVA_MAX_COMPLETION_TOKENS,
         )
-
-        parsed = getattr(response, "parsed", None)
-
-        if isinstance(parsed, ManufacturingInfoLlmExtractResponse):
-            data = parsed
-        elif isinstance(parsed, dict):
-            data = ManufacturingInfoLlmExtractResponse(**parsed)
-        else:
-            text = clean_text(getattr(response, "text", ""))
-            data = ManufacturingInfoLlmExtractResponse(**json.loads(text))
 
         if not data.matched or data.confidence < 0.55:
             return None
@@ -1392,24 +1382,13 @@ def _llm_compare_manufacturing_field(
 """.strip()
 
     try:
-        response = client.models.generate_content(
-            model=DEFAULT_GEMINI_MODEL,
-            contents=prompt,
-            config={
-                "response_mime_type": "application/json",
-                "response_schema": ManufacturingInfoLlmCompareResponse,
-            },
+        data = request_structured_response(
+            client=client,
+            model=DEFAULT_CLOVA_MODEL,
+            prompt=prompt,
+            response_model=ManufacturingInfoLlmCompareResponse,
+            max_completion_tokens=CLOVA_MAX_COMPLETION_TOKENS,
         )
-
-        parsed = getattr(response, "parsed", None)
-
-        if isinstance(parsed, ManufacturingInfoLlmCompareResponse):
-            data = parsed
-        elif isinstance(parsed, dict):
-            data = ManufacturingInfoLlmCompareResponse(**parsed)
-        else:
-            text = clean_text(getattr(response, "text", ""))
-            data = ManufacturingInfoLlmCompareResponse(**json.loads(text))
 
         status = clean_text(data.status)
 

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
 from sp_pdf_judger.domain_details import DomainDetailStore
-from sp_pdf_judger.llm import GeminiJudgeClient
+from sp_pdf_judger.llm import ClovaJudgeClient
 
 
 def _write_detail(
@@ -135,7 +136,21 @@ def test_llm_prompt_contains_merged_detail_context() -> None:
                 }
             )
 
-    client = GeminiJudgeClient(
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            legacy_response = FakeModels().generate_content(**kwargs)
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content=json.dumps(legacy_response.parsed, ensure_ascii=False)
+                        )
+                    )
+                ]
+            )
+
+    client = ClovaJudgeClient(
         api_key="",
         domain_detail_context=(
             "[전체 디테일: 공통]\n공통 확인\n\n"
@@ -144,7 +159,9 @@ def test_llm_prompt_contains_merged_detail_context() -> None:
         ),
     )
     client.enabled = True
-    client.client = SimpleNamespace(models=FakeModels())
+    client.client = SimpleNamespace(
+        chat=SimpleNamespace(completions=FakeCompletions())
+    )
 
     response = client.explain(
         test_name="확인시험",
@@ -154,7 +171,7 @@ def test_llm_prompt_contains_merged_detail_context() -> None:
     )
 
     assert response is not None
-    prompt = str(captured["contents"])
+    prompt = str(captured["messages"][0]["content"])
     assert "[전체 디테일: 공통]" in prompt
     assert "[회사 디테일: GC녹십자]" in prompt
     assert "[제품 디테일: 사람혈청알부민]" in prompt

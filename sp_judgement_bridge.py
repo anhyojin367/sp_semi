@@ -101,6 +101,178 @@ def _final_component_height(result: Any) -> int:
     return max(JUDGE_COMPONENT_HEIGHT, min(height, 90000))
 
 
+def _display_status_text(status: str | None) -> str:
+    status = str(status or "").strip()
+    return {
+        "검수합격": "충족",
+        "합격": "충족",
+        "검수불합격": "불충족",
+        "불합격": "불충족",
+        "검수보류": "보류",
+    }.get(status, status or "보류")
+
+
+def _display_reason_text(text: str | None) -> str:
+    text = str(text or "")
+    return (
+        text
+        .replace("검수불합격", "불충족")
+        .replace("검수합격", "충족")
+        .replace("검수보류", "보류")
+        .replace("불합격", "불충족")
+        .replace("합격", "충족")
+    )
+
+
+def _render_structural_validation_cards(
+    result: Any,
+    *,
+    record_type: str = "structural_validation",
+    section_title: str = "문서 기본요건 적합성 확인 결과",
+    fallback_title: str = "구조 검증",
+) -> str:
+    evaluations = [
+        ev
+        for ev in list(getattr(result, "evaluations", []) or [])
+        if str(getattr(ev, "record_type", "") or "").strip() == record_type
+    ]
+
+    if not evaluations:
+        return ""
+
+    def status_class(status: str) -> str:
+        if status == "충족":
+            return "pass"
+        if status == "불충족":
+            return "fail"
+        return "hold"
+
+    cards: list[str] = []
+
+    for ev in evaluations:
+        status = _display_status_text(getattr(ev, "final_status", None))
+        klass = status_class(status)
+        title = str(getattr(ev, "test_name", "") or fallback_title)
+        section_number = str(getattr(ev, "section_number", "") or "")
+        criteria = str(getattr(ev, "criteria", "") or "")
+        result_text = str(getattr(ev, "result", "") or "")
+        reason = _display_reason_text(getattr(ev, "reason", ""))
+
+        cards.append(
+            f"""
+            <article class="structural-card {klass}">
+              <div class="structural-card-head">
+                <div>
+                  <div class="structural-card-kicker">{html.escape(section_number)}</div>
+                  <div class="structural-card-title">{html.escape(title)}</div>
+                </div>
+                <span class="structural-card-status {klass}">{html.escape(status)}</span>
+              </div>
+              <div class="structural-card-body">
+                <div><b>검증 기준</b><span>{html.escape(criteria)}</span></div>
+                <div><b>검증 결과</b><span>{html.escape(result_text)}</span></div>
+                <div><b>판정 이유</b><span>{html.escape(reason)}</span></div>
+              </div>
+            </article>
+            """
+        )
+
+    return f"""
+    <section class="structural-validation-section">
+      <style>
+        .structural-validation-section {{
+          font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+          margin:26px 0 20px 0;
+        }}
+        .structural-validation-title {{
+          font-size:22px;
+          font-weight:900;
+          color:#111827;
+          margin:8px 0 14px 0;
+        }}
+        .structural-card-grid {{
+          display:grid;
+          grid-template-columns:repeat(2,minmax(0,1fr));
+          gap:14px;
+        }}
+        .structural-card {{
+          border:1px solid #dbe3ea;
+          border-left:7px solid #f59e0b;
+          border-radius:16px;
+          background:#ffffff;
+          box-shadow:0 10px 28px rgba(15,23,42,.07);
+          overflow:hidden;
+        }}
+        .structural-card.pass {{ border-left-color:#22c55e; }}
+        .structural-card.fail {{ border-left-color:#ef4444; }}
+        .structural-card.hold {{ border-left-color:#f59e0b; }}
+        .structural-card-head {{
+          display:flex;
+          justify-content:space-between;
+          gap:18px;
+          align-items:flex-start;
+          padding:20px 22px 12px;
+          border-bottom:1px solid #edf2f7;
+        }}
+        .structural-card-kicker {{
+          color:#2563eb;
+          font-size:13px;
+          line-height:1.2;
+          font-weight:950;
+          letter-spacing:.04em;
+        }}
+        .structural-card-title {{
+          margin-top:6px;
+          color:#111827;
+          font-size:20px;
+          line-height:1.35;
+          font-weight:950;
+        }}
+        .structural-card-status {{
+          flex:0 0 auto;
+          border-radius:999px;
+          padding:7px 13px;
+          font-size:15px;
+          font-weight:950;
+          white-space:nowrap;
+        }}
+        .structural-card-status.pass {{ color:#15803d; background:#dcfce7; }}
+        .structural-card-status.fail {{ color:#b91c1c; background:#fee2e2; }}
+        .structural-card-status.hold {{ color:#b45309; background:#fef3c7; }}
+        .structural-card-body {{
+          display:grid;
+          gap:11px;
+          padding:16px 22px 20px;
+          color:#334155;
+          font-size:16px;
+          line-height:1.65;
+        }}
+        .structural-card-body div {{
+          display:grid;
+          grid-template-columns:92px minmax(0,1fr);
+          gap:14px;
+        }}
+        .structural-card-body b {{
+          color:#111827;
+          font-weight:900;
+        }}
+        .structural-card-body span {{
+          white-space:pre-wrap;
+          overflow-wrap:anywhere;
+        }}
+        @media (max-width:900px) {{
+          .structural-card-grid {{ grid-template-columns:1fr; }}
+          .structural-card-body div {{ grid-template-columns:1fr; gap:4px; }}
+        }}
+      </style>
+      <div class="structural-validation-title">{html.escape(section_title)}</div>
+      <div class="structural-card-grid">
+        {''.join(cards)}
+      </div>
+    </section>
+    """
+
+
 def _parent_scroll_bridge_script() -> str:
     return """
     <script>
@@ -2026,6 +2198,19 @@ def render_final_judgement_page(
                 summary_counts_path=artifacts.get("summary_after_path"),
             )
         )
+
+    structural_validation_html = _render_structural_validation_cards(result)
+    if structural_validation_html:
+        combined_parts.append(structural_validation_html)
+
+    numeric_precision_html = _render_structural_validation_cards(
+        result,
+        record_type="numeric_precision_validation",
+        section_title="계산 및 수치 정합성 확인 결과",
+        fallback_title="수치 정합성 검증",
+    )
+    if numeric_precision_html:
+        combined_parts.append(numeric_precision_html)
 
     combined_parts.append(
         """

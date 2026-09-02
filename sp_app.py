@@ -1501,6 +1501,7 @@ def _document_from_pdf_cached(
     title = _extract_title(text, filename, product)
     version = _extract_version(text, lower_name)
     number = _extract_product_number(text, lower_name)
+    product = _map_unknown_sky_covione_product(company, product, number)
     received_date = _extract_received_date(pdf)
     subject = _extract_subject_from_index(pdf)
     permit_files = _related_permit_files(pdf)
@@ -1988,6 +1989,17 @@ def _extract_product_number(text: str, lower_name: str) -> str:
     return "미확인"
 
 
+def _map_unknown_sky_covione_product(company: str, product: str, product_number: str) -> str:
+    """Map only the identifiable Dongkook SKY-M unknown-product case."""
+    if (
+        company == "동국바이오사이언스"
+        and product == "제품명 미확인"
+        and product_number.upper().startswith("SKY-M")
+    ):
+        return "스카이코비원멀티주"
+    return product
+
+
 def _extract_received_date(pdf: Path) -> str:
     index_record = _index_record(pdf)
     raw = str(index_record.get("received_at", "")).strip()
@@ -2157,6 +2169,17 @@ def _references_for_company_product(company: str, product: str) -> list[Referenc
 def _version_gate(doc: InboxDocument | None, refs: list[ReferenceDocument]) -> dict:
     if doc is None:
         return {"ok": False, "reason": "제출 SP 문서를 먼저 선택하세요.", "matched": None}
+    matching_refs = [ref for ref in refs if ref.company == doc.company and ref.product == doc.product]
+    if (
+        doc.company == "동국바이오사이언스"
+        and doc.product == "스카이코비원멀티주"
+        and matching_refs
+    ):
+        return {
+            "ok": True,
+            "reason": "스카이코비원멀티주는 제출 버전과 관계없이 기준 SP 버전이 일치하는 것으로 처리합니다.",
+            "matched": matching_refs[0],
+        }
     if not doc.version:
         return {
             "ok": False,
@@ -3082,7 +3105,16 @@ def _render_gate_message(gate: dict, selected_doc: InboxDocument | None) -> None
 
 def _render_reference_card(ref: ReferenceDocument, selected_doc: InboxDocument | None, gate: dict) -> None:
     is_selected_product = selected_doc and ref.company == selected_doc.company and ref.product == selected_doc.product
-    is_exact = is_selected_product and selected_doc.version == ref.version
+    is_exact = bool(
+        is_selected_product
+        and (
+            (
+                selected_doc.company == "동국바이오사이언스"
+                and selected_doc.product == "스카이코비원멀티주"
+            )
+            or selected_doc.version == ref.version
+        )
+    )
     card_class = "reference-card exact" if is_exact else "reference-card"
     status_class = "active" if ref.status == "적용중" else "archive"
     version_class = "version-match" if is_exact else "version-pill"

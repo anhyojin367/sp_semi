@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import tempfile
 from dataclasses import dataclass
@@ -15,11 +16,16 @@ from .domain_details import DomainDetailProfile, DomainDetailStore
 from .extractor import extract_records
 from .hierarchy import build_document_tree
 from .judgement import JudgeEngine
-from .llm import GeminiJudgeClient
+from .llm import ClovaJudgeClient
 from .permit_pdf_store import PermitPdfStore
 from .preview import render_first_page
 from .rag import UcumRagStore
-from .schemas import ProcessingResult, Summary
+from .manufacturing_info_validator import (
+    _norm_match,
+    collect_manufacturing_info_occurrences,
+    extract_summary_items_from_records,
+)
+from .schemas import Evaluation, ProcessingResult, Summary
 from .sp_table_result_generalizer import expand_table_records_for_judgement
 from .utils import clean_text, ensure_dir
 
@@ -780,6 +786,897 @@ def _judge_manufacturing_summary_page(
     )
 
 
+def _make_structural_evaluation(
+    *,
+    order_idx: int,
+    section_number: str,
+    test_name: str,
+    criteria: str,
+    result: str,
+    final_status: str,
+    reason: str,
+    raw_text: str = "",
+    record_type: str = "structural_validation",
+    section_title: str = "문서 기본요건 적합성 확인 로직",
+    source: str = "structural_rule",
+) -> Evaluation:
+    return Evaluation(
+        order_idx=order_idx,
+        record_type=record_type,
+        section_number=section_number,
+        section_title=section_title,
+        test_name=test_name,
+        criteria=criteria,
+        result=result,
+        final_status=final_status,
+        reason=reason,
+        confidence="normal",
+        source=source,
+        raw_text=raw_text or result,
+        comparison_completed=True,
+    )
+
+
+def _load_extraction_result(extract_dir: Path) -> dict:
+    path = extract_dir / "06_extraction_result.json"
+
+    if not path.exists():
+        return {}
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+    return data if isinstance(data, dict) else {}
+
+
+def _build_page_continuity_evaluation(
+    *,
+    pdf_path: Path,
+    extract_dir: Path,
+    order_idx: int,
+) -> tuple[Evaluation, dict]:
+    criteria = (
+        "SP 문서 각 페이지의 현재 페이지 번호와 전체 페이지 수가 확인되고, "
+        "현재 페이지 번호가 1페이지부터 마지막 페이지까지 연속되어야 합니다."
+    )
+    actual_total_pages = 0
+
+    try:
+        with fitz.open(pdf_path) as doc:
+            actual_total_pages = len(doc)
+    except Exception:
+        pass
+
+    extraction_result = _load_extraction_result(extract_dir)
+    page_headers = extraction_result.get("page_headers") or []
+
+    if not isinstance(page_headers, list) or not page_headers:
+        result = "페이지 번호 메타데이터 미확인"
+        reason = (
+            "추출 JSON에서 페이지 번호 메타데이터(page_headers)를 확인하지 못해 "
+            "페이지 누락 여부를 자동 확정하지 못했습니다."
+        )
+        return (
+            _make_structural_evaluation(
+                order_idx=order_idx,
+                section_number="A.2",
+                test_name="페이지 번호 연속성 및 전체 페이지 수 확인",
+                criteria=criteria,
+                result=result,
+                final_status=HOLD_LABEL,
+                reason=reason,
+            ),
+            {
+                "actual_total_pages": actual_total_pages,
+                "page_headers_found": False,
+                "missing_pdf_pages": [],
+                "printed_sequence": [],
+                "violations": [result],
+            },
+        )
+
+    printable_headers: list[dict] = []
+    missing_pdf_pages: list[int] = []
+
+    for header in page_headers:
+        if not isinstance(header, dict):
+            continue
+
+        pdf_page = header.get("pdf_page")
+        printed_page = header.get("printed_page")
+        printed_total = header.get("printed_total_pages")
+
+        if printed_page is None or printed_total is None:
+            if isinstance(pdf_page, int):
+                missing_pdf_pages.append(pdf_page)
+            continue
+
+        try:
+            printable_headers.append(
+                {
+                    "pdf_page": int(pdf_page),
+                    "printed_page": int(printed_page),
+                    "printed_total_pages": int(printed_total),
+                }
+            )
+        except (TypeError, ValueError):
+            if isinstance(pdf_page, int):
+                missing_pdf_pages.append(pdf_page)
+
+    if not printable_headers:
+        result = "문서 내 인쇄 페이지 번호 미확인"
+        reason = (
+            "추출 JSON에는 page_headers가 있으나 인쇄된 현재/전체 페이지 번호가 "
+            "확인되지 않아 페이지 누락 여부를 자동 확정하지 못했습니다."
+        )
+        return (
+            _make_structural_evaluation(
+                order_idx=order_idx,
+                section_number="A.2",
+                test_name="페이지 번호 연속성 및 전체 페이지 수 확인",
+                criteria=criteria,
+                result=result,
+                final_status=HOLD_LABEL,
+                reason=reason,
+            ),
+            {
+                "actual_total_pages": actual_total_pages,
+                "page_headers_found": True,
+                "missing_pdf_pages": missing_pdf_pages,
+                "printed_sequence": [],
+                "violations": [result],
+            },
+        )
+
+    printable_headers.sort(key=lambda item: item["pdf_page"])
+    printed_sequence = [item["printed_page"] for item in printable_headers]
+    printed_totals = [item["printed_total_pages"] for item in printable_headers]
+    printed_total_candidates = sorted(set(printed_totals))
+    expected_printed_total = printed_total_candidates[0] if len(printed_total_candidates) == 1 else 0
+    expected_sequence = (
+        list(range(1, expected_printed_total + 1))
+        if expected_printed_total
+        else []
+    )
+    printable_pdf_pages = {item["pdf_page"] for item in printable_headers}
+    cover_page_pdf_pages = [
+        page
+        for page in missing_pdf_pages
+        if page < min(printable_pdf_pages)
+    ] if printable_pdf_pages else []
+    non_cover_missing_pdf_pages = [
+        page
+        for page in missing_pdf_pages
+        if page not in set(cover_page_pdf_pages)
+    ]
+    violations: list[str] = []
+
+    if len(printed_total_candidates) > 1:
+        totals = ", ".join(str(total) for total in printed_total_candidates)
+        violations.append(
+            f"문서 내 표시 전체 페이지 수가 서로 일치하지 않습니다: {totals}"
+        )
+
+    if expected_sequence and printed_sequence != expected_sequence:
+        violations.append(
+            "인쇄된 현재 페이지 번호가 1페이지부터 마지막 페이지까지 연속되지 않습니다."
+        )
+
+    if expected_printed_total and len(printable_headers) != expected_printed_total:
+        violations.append(
+            f"인쇄 페이지 번호가 확인된 본문 페이지 수({len(printable_headers)})와 표시 전체 페이지 수({expected_printed_total})가 일치하지 않습니다."
+        )
+
+    if non_cover_missing_pdf_pages:
+        violations.append(
+            "일부 PDF 페이지에서 인쇄된 현재/전체 페이지 번호를 확인하지 못했습니다: "
+            + ", ".join(str(page) for page in sorted(set(non_cover_missing_pdf_pages))[:12])
+        )
+
+    if violations:
+        result = "페이지 누락 확인"
+        reason = "\n".join(
+            [
+                "페이지 번호 또는 전체 페이지 수 불일치가 확인되어 페이지 누락으로 판단했습니다.",
+                *[f"- {violation}" for violation in violations],
+            ]
+        )
+        status = FAIL_LABEL if "확인하지 못했습니다" not in " ".join(violations) else HOLD_LABEL
+    else:
+        result = (
+            f"인쇄 페이지 {printed_sequence[0]}/{printed_totals[0]}부터 "
+            f"{printed_sequence[-1]}/{printed_totals[-1]}까지 연속 확인"
+        )
+        if cover_page_pdf_pages:
+            reason = (
+                "표지로 판단되는 첫 PDF 페이지를 제외하고, 본문 인쇄 페이지 번호가 "
+                f"1/{expected_printed_total}부터 {expected_printed_total}/{expected_printed_total}까지 "
+                "연속 확인되어 충족으로 판단했습니다."
+            )
+        else:
+            reason = "본문 인쇄 페이지 번호와 표시 전체 페이지 수가 연속 확인되어 충족으로 판단했습니다."
+        status = PASS_LABEL
+
+    return (
+        _make_structural_evaluation(
+            order_idx=order_idx,
+            section_number="A.2",
+            test_name="페이지 번호 연속성 및 전체 페이지 수 확인",
+            criteria=criteria,
+            result=result,
+            final_status=status,
+            reason=reason,
+            raw_text="\n".join(
+                f"PDF {item['pdf_page']}: {item['printed_page']}/{item['printed_total_pages']} 페이지"
+                for item in printable_headers
+            ),
+        ),
+        {
+            "actual_total_pages": actual_total_pages,
+            "page_headers_found": True,
+            "missing_pdf_pages": missing_pdf_pages,
+            "cover_page_pdf_pages": cover_page_pdf_pages,
+            "non_cover_missing_pdf_pages": non_cover_missing_pdf_pages,
+            "printed_sequence": printed_sequence,
+            "printed_total_pages": printed_total_candidates,
+            "violations": violations,
+        },
+    )
+
+
+def _has_detail_manufacturing_occurrence(occurrence) -> bool:
+    source_label = clean_text(getattr(occurrence, "source_label", ""))
+    section_number = clean_text(getattr(occurrence, "section_number", ""))
+
+    if "제조요약도" in source_label or "제조요약정보" in source_label:
+        return False
+
+    if section_number == "1.2":
+        return False
+
+    return True
+
+
+def _build_process_item_coverage_evaluation(
+    *,
+    records_source,
+    order_idx: int,
+) -> tuple[Evaluation, dict]:
+    criteria = (
+        "제조요약도에 기재된 각 제조단계 및 공정 항목이 상세제조기록에 "
+        "누락 없이 기재되어야 합니다."
+    )
+    summary_items = extract_summary_items_from_records(records_source)
+
+    if not summary_items:
+        result = "제조요약도 공정 항목 미추출"
+        reason = (
+            "제조요약도에서 제조단계 또는 공정 항목을 추출하지 못해 "
+            "상세제조기록 누락 여부를 자동 확정하지 못했습니다."
+        )
+        return (
+            _make_structural_evaluation(
+                order_idx=order_idx,
+                section_number="A.3",
+                test_name="제조요약도 공정 항목 상세제조기록 기재 확인",
+                criteria=criteria,
+                result=result,
+                final_status=HOLD_LABEL,
+                reason=reason,
+            ),
+            {"summary_stage_names": [], "missing_stage_names": [], "covered_stage_names": []},
+        )
+
+    occurrences = collect_manufacturing_info_occurrences(records_source, summary_items)
+    missing_stage_names: list[str] = []
+    covered_stage_names: list[str] = []
+
+    for item in summary_items:
+        stage_key = _norm_match(item.stage_name)
+        stage_occurrences = list(occurrences.get(stage_key, []))
+
+        if any(_has_detail_manufacturing_occurrence(occurrence) for occurrence in stage_occurrences):
+            covered_stage_names.append(item.stage_name)
+        else:
+            missing_stage_names.append(item.stage_name)
+
+    if missing_stage_names:
+        result = "공정 항목 누락 확인: " + ", ".join(missing_stage_names[:8])
+        reason = "\n".join(
+            [
+                "제조요약도에 존재하는 제조단계 또는 공정 항목이 상세제조기록에서 확인되지 않아 공정 항목 누락으로 판단했습니다.",
+                *[f"- {name}" for name in missing_stage_names[:12]],
+            ]
+        )
+        status = FAIL_LABEL
+    else:
+        result = f"제조요약도 공정 항목 {len(covered_stage_names)}건 상세제조기록 기재 확인"
+        reason = "제조요약도의 각 제조단계 및 공정 항목이 상세제조기록에서 확인되어 충족으로 판단했습니다."
+        status = PASS_LABEL
+
+    return (
+        _make_structural_evaluation(
+            order_idx=order_idx,
+            section_number="A.3",
+            test_name="제조요약도 공정 항목 상세제조기록 기재 확인",
+            criteria=criteria,
+            result=result,
+            final_status=status,
+            reason=reason,
+        ),
+        {
+            "summary_stage_names": [item.stage_name for item in summary_items],
+            "missing_stage_names": missing_stage_names,
+            "covered_stage_names": covered_stage_names,
+        },
+    )
+
+
+def _build_structural_evaluations(
+    *,
+    pdf_path: Path,
+    extract_dir: Path,
+    records: list,
+    start_order_idx: int,
+) -> tuple[list[Evaluation], dict]:
+    page_eval, page_meta = _build_page_continuity_evaluation(
+        pdf_path=pdf_path,
+        extract_dir=extract_dir,
+        order_idx=start_order_idx,
+    )
+    records_source = {
+        "pdf_path": str(pdf_path),
+        "records": records,
+        "metadata": {"extract_dir": str(extract_dir)},
+    }
+    process_eval, process_meta = _build_process_item_coverage_evaluation(
+        records_source=records_source,
+        order_idx=start_order_idx + 1,
+    )
+
+    return [page_eval, process_eval], {
+        "page_continuity": page_meta,
+        "process_item_coverage": process_meta,
+    }
+
+
+NUMBER_TOKEN_RE = re.compile(r"(?<![A-Za-z가-힣])[-+]?\d+(?:\.\d+)?(?![A-Za-z가-힣])")
+
+SKY_COVIONE_REQUIRED_TEST_UNITS = [
+    ("세포성장 및 증식확인시험", "cells/mL"),
+    ("박테리오파지확인시험", "PFU/mL"),
+    ("생균수시험", "CFU/mL"),
+    ("플라스미드 대장균수확인시험", "AU"),
+    ("확인시험", "copies/cell"),
+    ("단백질함량시험", "μg/mL"),
+    ("엔도톡신시험", "EU/mL"),
+    ("잔류 숙주세포 유래 단백질시험", "μg/mg of protein"),
+    ("잔류 숙주세포 유래 DNA시험", "ng/mg of protein"),
+    ("박테리오파지부정시험", "pg/μL"),
+    ("항원함량시험", "μg/mL"),
+    ("엔도톡신", "EU/mg of protein"),
+    ("입자크기측정시험", "nm"),
+    ("삼투압시험", "mOsm/kg"),
+    ("주사제의 불용성미립자시험", "μm"),
+    ("주사제 실용량시험", "mL"),
+]
+
+UNIT_CANONICAL_ALIASES = {
+    "cells/ml": "cells/mL",
+    "cell/ml": "cells/mL",
+    "pfu/ml": "PFU/mL",
+    "cfu/ml": "CFU/mL",
+    "au": "AU",
+    "copies/cell": "copies/cell",
+    "copy/cell": "copies/cell",
+    "ug/ml": "μg/mL",
+    "μg/ml": "μg/mL",
+    "µg/ml": "μg/mL",
+    "eu/ml": "EU/mL",
+    "ug/mgofprotein": "μg/mg of protein",
+    "μg/mgofprotein": "μg/mg of protein",
+    "µg/mgofprotein": "μg/mg of protein",
+    "ng/mgofprotein": "ng/mg of protein",
+    "pg/ul": "pg/μL",
+    "pg/μl": "pg/μL",
+    "pg/µl": "pg/μL",
+    "eu/mgofprotein": "EU/mg of protein",
+    "nm": "nm",
+    "mosm/kg": "mOsm/kg",
+    "um": "μm",
+    "μm": "μm",
+    "µm": "μm",
+    "ml": "mL",
+}
+
+PRODUCT_UNIT_PATTERN = re.compile(
+    r"(?<![A-Za-z가-힣])"
+    r"(?:μg/mg\s*of\s*protein|µg/mg\s*of\s*protein|ug/mg\s*of\s*protein|"
+    r"ng/mg\s*of\s*protein|EU/mg\s*of\s*protein|"
+    r"cells/mL|cell/mL|cells/ml|cell/ml|PFU/mL|PFU/ml|CFU/mL|CFU/ml|"
+    r"copies/cell|copy/cell|μg/mL|µg/mL|ug/mL|EU/mL|EU/ml|"
+    r"pg/μL|pg/µL|pg/uL|pg/ul|mOsm/kg|AU|nm|μm|µm|um|mL|ml)"
+    r"(?![A-Za-z가-힣])",
+    re.I,
+)
+
+
+def _looks_like_date_context(text: str, start: int, end: int) -> bool:
+    before = text[max(0, start - 12):start]
+    after = text[end:min(len(text), end + 12)]
+    context = before + text[start:end] + after
+
+    if re.search(r"20\d{2}\s*[.\-/년]\s*\d{1,2}", context):
+        return True
+
+    if re.search(r"\d{1,2}\s*[.\-/월]\s*\d{1,2}", context):
+        return True
+
+    if re.search(r"\d+\s*/\s*\d+\s*페이지", context):
+        return True
+
+    if re.search(r"Ver\.?\s*\d", context, re.I):
+        return True
+
+    if re.search(r"(제조번호|문서\s*ID|로트번호|Lot|LOT)", context, re.I):
+        return True
+
+    return False
+
+
+def _extract_decimal_tokens(text: str | None) -> list[dict]:
+    text = clean_text(text)
+    if not text:
+        return []
+
+    tokens: list[dict] = []
+
+    for match in NUMBER_TOKEN_RE.finditer(text):
+        value = match.group(0)
+
+        if _looks_like_date_context(text, match.start(), match.end()):
+            continue
+
+        if "." in value:
+            decimals = len(value.rsplit(".", 1)[1])
+            numeric_key = value.rstrip("0").rstrip(".")
+        else:
+            decimals = 0
+            numeric_key = value
+
+        tokens.append(
+            {
+                "text": value,
+                "decimals": decimals,
+                "numeric_key": numeric_key,
+                "start": match.start(),
+                "end": match.end(),
+            }
+        )
+
+    return tokens
+
+
+def _record_display_name(record) -> str:
+    parts = [
+        clean_text(getattr(record, "section_number", "")),
+        clean_text(getattr(record, "section_title", "")),
+        clean_text(getattr(record, "test_name", "")),
+        clean_text(getattr(record, "content_label", "")),
+    ]
+    return " ".join(part for part in parts if part) or "문서 항목"
+
+
+def _build_decimal_precision_pair_evaluation(
+    *,
+    records: list,
+    order_idx: int,
+) -> tuple[Evaluation, dict]:
+    criteria = (
+        "허가사항 또는 시험기준의 수치가 소수점 이하 자릿수를 포함하여 명시된 경우, "
+        "시험결과값도 동일한 소수점 이하 자릿수로 기재되어야 합니다."
+    )
+    violations: list[dict] = []
+    checked_count = 0
+
+    for record in records:
+        if clean_text(getattr(record, "record_type", "")) != "test":
+            continue
+
+        criteria_tokens = [
+            token for token in _extract_decimal_tokens(getattr(record, "criteria", ""))
+            if token["decimals"] > 0
+        ]
+        result_tokens = _extract_decimal_tokens(getattr(record, "result", ""))
+
+        if not criteria_tokens or not result_tokens:
+            continue
+
+        expected_places = sorted({token["decimals"] for token in criteria_tokens})
+
+        if len(expected_places) != 1:
+            continue
+
+        expected = expected_places[0]
+        checked_count += 1
+
+        for result_token in result_tokens:
+            if result_token["decimals"] != expected:
+                violations.append(
+                    {
+                        "item": _record_display_name(record),
+                        "criteria_numbers": [token["text"] for token in criteria_tokens],
+                        "result_number": result_token["text"],
+                        "expected_decimals": expected,
+                        "actual_decimals": result_token["decimals"],
+                    }
+                )
+
+    if violations:
+        result = f"소수점 자릿수 불일치 {len(violations)}건 확인"
+        reason_lines = [
+            "시험기준의 소수점 이하 자릿수와 시험결과값의 소수점 이하 자릿수가 일치하지 않아 불충족으로 판단했습니다.",
+        ]
+        for item in violations[:12]:
+            reason_lines.append(
+                f"- {item['item']}: 기준 수치 {', '.join(item['criteria_numbers'])} 기준 "
+                f"소수 {item['expected_decimals']}자리이나 결과 {item['result_number']}는 "
+                f"소수 {item['actual_decimals']}자리입니다."
+            )
+        status = FAIL_LABEL
+    elif checked_count:
+        result = f"기준-결과 소수점 자릿수 {checked_count}건 일치"
+        reason_lines = [
+            "소수점 이하 자릿수가 명시된 시험기준과 해당 시험결과값의 자릿수가 모두 일치하여 충족으로 판단했습니다."
+        ]
+        status = PASS_LABEL
+    else:
+        result = "비교 가능한 기준-결과 소수점 수치 미확인"
+        reason_lines = [
+            "시험기준과 시험결과 양쪽에서 자동 비교 가능한 소수점 수치 쌍을 확인하지 못해 보류로 판단했습니다."
+        ]
+        status = HOLD_LABEL
+
+    return (
+        _make_structural_evaluation(
+            order_idx=order_idx,
+            section_number="B.1",
+            test_name="시험기준-시험결과 소수점 자릿수 일치 확인",
+            criteria=criteria,
+            result=result,
+            final_status=status,
+            reason="\n".join(reason_lines),
+            record_type="numeric_precision_validation",
+            section_title="계산 및 수치 정합성 확인 로직",
+            source="numeric_precision_rule",
+        ),
+        {"checked_count": checked_count, "violations": violations},
+    )
+
+
+def _build_document_decimal_consistency_evaluation(
+    *,
+    records: list,
+    order_idx: int,
+) -> tuple[Evaluation, dict]:
+    criteria = (
+        "문서 내 동일 시험 또는 동일 항목에서 기준 수치가 소수점 이하 자릿수로 제시된 경우, "
+        "그 하위 또는 동일 맥락의 수치 표기는 동일한 소수점 이하 자릿수로 통일되어야 합니다."
+    )
+    violations: list[dict] = []
+    checked_contexts = 0
+
+    for record in records:
+        context_name = _record_display_name(record)
+        combined = "\n".join(
+            clean_text(value)
+            for value in [
+                getattr(record, "criteria", ""),
+                getattr(record, "result", ""),
+                getattr(record, "content", ""),
+                getattr(record, "raw_text", ""),
+            ]
+            if clean_text(value)
+        )
+        tokens = _extract_decimal_tokens(combined)
+        decimal_tokens = [token for token in tokens if token["decimals"] > 0]
+
+        if not decimal_tokens:
+            continue
+
+        expected_places = sorted({token["decimals"] for token in decimal_tokens})
+
+        if len(expected_places) != 1:
+            continue
+
+        expected = expected_places[0]
+        comparable_tokens = [
+            token
+            for token in tokens
+            if token["numeric_key"] in {item["numeric_key"] for item in decimal_tokens}
+        ]
+
+        if len(comparable_tokens) <= 1:
+            continue
+
+        checked_contexts += 1
+        mismatches = [
+            token
+            for token in comparable_tokens
+            if token["decimals"] != expected
+        ]
+
+        if mismatches:
+            violations.append(
+                {
+                    "item": context_name,
+                    "expected_decimals": expected,
+                    "reference_numbers": [token["text"] for token in decimal_tokens[:5]],
+                    "mismatch_numbers": [token["text"] for token in mismatches[:8]],
+                }
+            )
+
+    if violations:
+        result = f"문서 내 소수점 자릿수 통일성 불일치 {len(violations)}건 확인"
+        reason_lines = [
+            "동일 시험 또는 동일 항목 안에서 소수점 이하 자릿수가 통일되지 않은 수치가 확인되어 불충족으로 판단했습니다.",
+        ]
+        for item in violations[:12]:
+            reason_lines.append(
+                f"- {item['item']}: 기준 표기 {', '.join(item['reference_numbers'])} 기준 "
+                f"소수 {item['expected_decimals']}자리이나 {', '.join(item['mismatch_numbers'])} 표기가 다릅니다."
+            )
+        status = FAIL_LABEL
+    elif checked_contexts:
+        result = f"문서 내 소수점 자릿수 통일성 {checked_contexts}개 항목 확인"
+        reason_lines = [
+            "동일 시험 또는 동일 항목 안의 수치 표기가 기준 소수점 이하 자릿수와 일치하여 충족으로 판단했습니다."
+        ]
+        status = PASS_LABEL
+    else:
+        result = "통일성 비교 가능한 소수점 수치 미확인"
+        reason_lines = [
+            "문서 내에서 기준 소수점 자릿수와 비교 가능한 반복 수치를 확인하지 못해 보류로 판단했습니다."
+        ]
+        status = HOLD_LABEL
+
+    return (
+        _make_structural_evaluation(
+            order_idx=order_idx,
+            section_number="B.2",
+            test_name="문서 내 동일 수치 소수점 자릿수 통일성 확인",
+            criteria=criteria,
+            result=result,
+            final_status=status,
+            reason="\n".join(reason_lines),
+            record_type="numeric_precision_validation",
+            section_title="계산 및 수치 정합성 확인 로직",
+            source="numeric_precision_rule",
+        ),
+        {"checked_contexts": checked_contexts, "violations": violations},
+    )
+
+
+def _canonical_product_unit(unit: str | None) -> str:
+    unit = clean_text(unit).replace("µ", "μ")
+    key = re.sub(r"\s+", "", unit).casefold()
+    return UNIT_CANONICAL_ALIASES.get(key, unit)
+
+
+def _extract_product_units(text: str | None) -> list[str]:
+    text = clean_text(text)
+    if not text:
+        return []
+
+    units: list[str] = []
+    seen: set[str] = set()
+
+    for match in PRODUCT_UNIT_PATTERN.finditer(text.replace("µ", "μ")):
+        unit = _canonical_product_unit(match.group(0))
+        if unit and unit not in seen:
+            units.append(unit)
+            seen.add(unit)
+
+    return units
+
+
+def _sky_covione_unit_rule_applies(detail_profile: DomainDetailProfile, records: list) -> bool:
+    detail_text = " ".join(
+        clean_text(value)
+        for value in [
+            getattr(detail_profile, "requested_company", ""),
+            getattr(detail_profile, "requested_product", ""),
+            getattr(detail_profile, "matched_company", ""),
+            getattr(detail_profile, "matched_product", ""),
+        ]
+    )
+    detail_key = _norm_match(detail_text)
+
+    if "스카이코비원" in detail_key or "skycovione" in detail_key:
+        return True
+
+    for record in records[:12]:
+        text = " ".join(
+            clean_text(getattr(record, attr, ""))
+            for attr in ["section_title", "content", "raw_text", "test_name"]
+        )
+        text_key = _norm_match(text)
+        if "스카이코비원" in text_key or "skycovione" in text_key:
+            return True
+
+    return False
+
+
+def _expected_sky_covione_unit_for_test(test_name: str | None) -> str:
+    test_key = _norm_match(test_name)
+    if not test_key:
+        return ""
+
+    exact_matches = [
+        unit
+        for name, unit in SKY_COVIONE_REQUIRED_TEST_UNITS
+        if _norm_match(name) == test_key
+    ]
+    if exact_matches:
+        return exact_matches[0]
+
+    partial_matches = [
+        (name, unit)
+        for name, unit in SKY_COVIONE_REQUIRED_TEST_UNITS
+        if _norm_match(name) in test_key or test_key in _norm_match(name)
+    ]
+    if not partial_matches:
+        return ""
+
+    partial_matches.sort(key=lambda item: len(_norm_match(item[0])), reverse=True)
+    return partial_matches[0][1]
+
+
+def _build_sky_covione_required_unit_evaluation(
+    *,
+    detail_profile: DomainDetailProfile,
+    records: list,
+    order_idx: int,
+) -> tuple[Evaluation | None, dict]:
+    if not _sky_covione_unit_rule_applies(detail_profile, records):
+        return None, {"applied": False, "reason": "스카이코비원멀티주 문서가 아니어서 제품별 단위 검증을 적용하지 않았습니다."}
+
+    criteria = (
+        "SK바이오사이언스 스카이코비원멀티주의 지정 시험항목은 제품별 시험별 단위표에 "
+        "명시된 단위만 사용해야 합니다."
+    )
+    checked: list[dict] = []
+    violations: list[dict] = []
+
+    for record in records:
+        if clean_text(getattr(record, "record_type", "")) != "test":
+            continue
+
+        test_name = clean_text(getattr(record, "test_name", ""))
+        expected_unit = _expected_sky_covione_unit_for_test(test_name)
+
+        if not expected_unit:
+            continue
+
+        field_units: list[tuple[str, str]] = []
+        for field_name, attr in [
+            ("시험기준", "criteria"),
+            ("시험결과", "result"),
+            ("원문", "raw_text"),
+        ]:
+            for unit in _extract_product_units(getattr(record, attr, "")):
+                field_units.append((field_name, unit))
+
+        actual_units = []
+        seen_units: set[str] = set()
+        for field_name, unit in field_units:
+            key = f"{field_name}:{unit}"
+            if key in seen_units:
+                continue
+            seen_units.add(key)
+            actual_units.append({"field": field_name, "unit": unit})
+
+        if not actual_units:
+            continue
+
+        checked.append(
+            {
+                "test_name": test_name,
+                "expected_unit": expected_unit,
+                "actual_units": actual_units,
+            }
+        )
+
+        mismatches = [
+            item for item in actual_units
+            if _canonical_product_unit(item["unit"]) != _canonical_product_unit(expected_unit)
+        ]
+        if mismatches:
+            violations.append(
+                {
+                    "test_name": test_name,
+                    "expected_unit": expected_unit,
+                    "mismatches": mismatches,
+                }
+            )
+
+    if violations:
+        result = f"단위불일치 {len(violations)}건 확인"
+        reason_lines = [
+            "SK바이오사이언스 스카이코비원멀티주 제품별 시험 단위표와 다른 단위가 확인되어 단위불일치로 불충족 판단했습니다.",
+        ]
+        for item in violations[:12]:
+            mismatch_text = ", ".join(
+                f"{mismatch['field']} {mismatch['unit']}"
+                for mismatch in item["mismatches"]
+            )
+            reason_lines.append(
+                f"- {item['test_name']}: 지정 단위 {item['expected_unit']}이나 {mismatch_text}로 기재되었습니다."
+            )
+        status = FAIL_LABEL
+    elif checked:
+        result = f"제품별 지정 단위 {len(checked)}건 일치"
+        reason_lines = [
+            "SK바이오사이언스 스카이코비원멀티주의 시험별 지정 단위와 문서 내 단위가 일치하여 충족으로 판단했습니다."
+        ]
+        status = PASS_LABEL
+    else:
+        result = "제품별 지정 단위 비교 대상 미확인"
+        reason_lines = [
+            "스카이코비원멀티주 문서로 판단되지만, 자동 비교 가능한 지정 시험항목 단위를 확인하지 못해 보류로 판단했습니다."
+        ]
+        status = HOLD_LABEL
+
+    return (
+        _make_structural_evaluation(
+            order_idx=order_idx,
+            section_number="B.3",
+            test_name="스카이코비원멀티주 시험별 지정 단위 확인",
+            criteria=criteria,
+            result=result,
+            final_status=status,
+            reason="\n".join(reason_lines),
+            record_type="numeric_precision_validation",
+            section_title="계산 및 수치 정합성 확인 로직",
+            source="product_unit_rule",
+        ),
+        {"applied": True, "checked": checked, "violations": violations},
+    )
+
+
+def _build_numeric_precision_evaluations(
+    *,
+    detail_profile: DomainDetailProfile,
+    records: list,
+    start_order_idx: int,
+) -> tuple[list[Evaluation], dict]:
+    pair_eval, pair_meta = _build_decimal_precision_pair_evaluation(
+        records=records,
+        order_idx=start_order_idx,
+    )
+    consistency_eval, consistency_meta = _build_document_decimal_consistency_evaluation(
+        records=records,
+        order_idx=start_order_idx + 1,
+    )
+    product_unit_eval, product_unit_meta = _build_sky_covione_required_unit_evaluation(
+        detail_profile=detail_profile,
+        records=records,
+        order_idx=start_order_idx + 2,
+    )
+
+    evaluations = [pair_eval, consistency_eval]
+    if product_unit_eval is not None:
+        evaluations.append(product_unit_eval)
+
+    return evaluations, {
+        "criteria_result_decimal_precision": pair_meta,
+        "document_decimal_consistency": consistency_meta,
+        "sky_covione_required_units": product_unit_meta,
+    }
+
+
 def _count_evaluation_statuses(evaluations):
     """
     일반 시험은 evaluation 1개를 1건으로 세고,
@@ -829,7 +1726,7 @@ class DocumentJudgePipeline:
         self.detail_store = detail_store or DomainDetailStore()
         self.detail_profile = self.detail_store.resolve(self.company, self.product)
         self.rag_store = UcumRagStore()
-        self.llm_client = GeminiJudgeClient(
+        self.llm_client = ClovaJudgeClient(
             domain_detail_context=self.detail_profile.render_for_llm()
         )
         self.permit_store = PermitPdfStore(permit_pdf_paths)
@@ -913,8 +1810,6 @@ class DocumentJudgePipeline:
             for r in test_records
         ]
 
-        tree = build_document_tree(records, evaluations)
-
         if static_result is not None:
             manufacturing_page_numbers = list(static_result.manufacturing_summary_page_numbers)
             manufacturing_image_paths = list(static_result.manufacturing_summary_image_paths)
@@ -942,6 +1837,29 @@ class DocumentJudgePipeline:
                 pdf_path=pdf_path,
                 page_numbers=manufacturing_page_numbers,
             )
+
+        structural_extract_dir = extract_dir
+        if static_result is not None:
+            static_extract_dir = getattr(static_result, "metadata", {}).get("extract_dir")
+            if static_extract_dir:
+                structural_extract_dir = Path(static_extract_dir)
+
+        next_order_idx = max((getattr(record, "order_idx", 0) for record in records), default=0) + 1
+        structural_evaluations, structural_meta = _build_structural_evaluations(
+            pdf_path=pdf_path,
+            extract_dir=structural_extract_dir,
+            records=records,
+            start_order_idx=next_order_idx,
+        )
+        evaluations.extend(structural_evaluations)
+        numeric_evaluations, numeric_meta = _build_numeric_precision_evaluations(
+            detail_profile=detail_profile,
+            records=records,
+            start_order_idx=next_order_idx + len(structural_evaluations),
+        )
+        evaluations.extend(numeric_evaluations)
+
+        tree = build_document_tree(records, evaluations)
 
         passed, failed, held = _count_evaluation_statuses(evaluations)
 
@@ -984,6 +1902,8 @@ class DocumentJudgePipeline:
                 "domain_detail_context": detail_profile.render_for_llm(),
                 "manufacturing_summary_page_numbers": manufacturing_page_numbers,
                 "manufacturing_summary_meta": manufacturing_meta,
+                "structural_validation": structural_meta,
+                "numeric_precision_validation": numeric_meta,
             },
             manufacturing_summary_image_paths=manufacturing_image_paths,
             manufacturing_summary_status=manufacturing_status,

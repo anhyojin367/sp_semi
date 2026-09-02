@@ -4,7 +4,7 @@ import re
 
 from .config import FAIL_LABEL, HOLD_LABEL, PASS_LABEL
 from .criteria_parser import parse_criteria_text
-from .llm import GeminiJudgeClient
+from .llm import ClovaJudgeClient
 from .permit_pdf_store import PermitPdfStore
 from .rag import UcumRagStore
 from .schemas import Evaluation, ExtractedRecord
@@ -2389,7 +2389,7 @@ class JudgeEngine:
     def __init__(
         self,
         rag_store: UcumRagStore,
-        llm_client: GeminiJudgeClient | None = None,
+        llm_client: ClovaJudgeClient | None = None,
         permit_store: PermitPdfStore | None = None,
     ) -> None:
         self.rag_store = rag_store

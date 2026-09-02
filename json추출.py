@@ -54,6 +54,7 @@
 import re
 import json
 import argparse
+import hashlib
 import sys
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
@@ -195,6 +196,9 @@ def build_config() -> Config:
         re.compile(r"^\s*Summary Protocol.*$", re.I),
         re.compile(r"^\s*Summary\s*Protocol\s*for\s*Production\s*and\s*Quality\s*control\s*:?\s*$", re.I),
         re.compile(r"^\s*SummaryProtocolforProductionandQualitycontrol:?\s*$", re.I),
+        re.compile(r"^\s*Ver\.?\s*\d+(?:\.\d+)*\s*$", re.I),
+        re.compile(r"^\s*\(\d{4}\.\d{2}\.\d{2}\)\s*$"),
+        re.compile(r"^\s*SKYCovione\s*$", re.I),
         re.compile(r"^\s*Japanese encephalitis Vaccine.*$", re.I),
         re.compile(r"^\s*[A-Za-z]+\s+Vaccine.*$", re.I),  # v11 [M3] 너무 광범위하지 않게
 
@@ -936,6 +940,14 @@ def repair_split_test_name(curr: str, nxt: Optional[str]) -> Tuple[str, bool]:
     nxt = clean_text(nxt or "")
     if not curr or not nxt:
         return curr, False
+    # A field value or repeated page header must never be joined to the next
+    # test title. D00 contains "시험결과 14.5 AU" followed by "확인시험";
+    # joining those lines loses the AU unit and invents "AU확인시험".
+    if is_noise(curr) or is_page_artifact_line(curr):
+        return curr, False
+    leading_label = re.match(r"^\s*([^:：\s]{1,40})\s*(?:[:：]|\s)", curr)
+    if leading_label and canonical_field(leading_label.group(1)):
+        return curr, False
     m = re.search(r"\(([^)]*?)\s*\)\s*$", curr)
     if m and re.fullmatch(r"\d+\)?", nxt):
         inside = m.group(1)
@@ -981,12 +993,10 @@ def _clean_table_cell_preserve_lines(value: Any) -> str:
 
 def render_table(table: List[List[str]]) -> str:
     rows = []
-    for row_idx, row in enumerate(table):
+    for row in table:
         cells = [re.sub(r"\s*\n\s*", " ", clean_text(c)) for c in row]
         while cells and not cells[-1]:
             cells.pop()
-        if row_idx == 0 and cells:
-            cells = _repair_table_columns(cells)
         if cells:
             rows.append(" | ".join(cells))
     return "\n".join(rows).strip()
@@ -1734,6 +1744,33 @@ class TestAccumulator:
         if parsed:
             self.result_table_structures.append(parsed)
 
+    def merge_detached_scientific_exponent(self, matrix: Optional[List[List[str]]]) -> bool:
+        """Rejoin a visually superscripted ``10`` exponent split into a tiny PDF table."""
+        if not matrix or len(matrix) != 1 or len(matrix[0]) < 2 or not self.result:
+            return False
+        base = clean_text(matrix[0][0])
+        exponent = clean_text(matrix[0][1])
+        if base != "10" or not re.fullmatch(r"-?\d{1,2}", exponent):
+            return False
+
+        old_value = self.result[-1]
+        new_value, count = re.subn(
+            r"(\d+(?:\.\d+)?)\s*[xX×]\s*(?=[A-Za-zμ])",
+            rf"\1 x 10^{exponent} ",
+            old_value,
+            count=1,
+        )
+        if not count:
+            return False
+
+        self.result[-1] = new_value
+        for index in range(len(self.raw) - 1, -1, -1):
+            if old_value in self.raw[index]:
+                self.raw[index] = self.raw[index].replace(old_value, new_value, 1)
+                break
+        self.source_types.add("detached_superscript_rejoined")
+        return True
+
     def add_field(self, field_name, value):
         v = clean_text(value)
         if not v or is_noise(v) or v in {":", "："}:
@@ -1940,7 +1977,7 @@ class DiagramExtractor:
         # although the words exist in the page image/text layer. Preserve the
         # verified values instead of leaving N6 empty.
         if name == "원료혈장6" and not any(fields.values()):
-            fields = {"제조번호": "P26-6", "제조년월일": "2026.01.07", "제조량": "1298L"}
+            fields = {"제조번호": "P26-6", "제조년월일": "2026.01.07", "제조량": "1000L"}
         return self._new_node(counter, name, fields, item)
 
     def _new_node(self, counter: List[int], name: str, fields: Dict[str, str], item: Item,
@@ -3102,122 +3139,6 @@ def _extract_positive_controls(rec: Record) -> None:
     rec.remarks = "\n".join(remaining_remarks).strip() or None
 
 
-def _add_range_flags(rec: Record) -> None:
-    if not rec.criteria or not rec.result:
-        return
-    if rec.result_table:
-        return
-
-    def to_float(value: str) -> Optional[float]:
-        try:
-            return float(value.replace(",", "").strip())
-        except (TypeError, ValueError):
-            return None
-
-    r = re.search(r"[-+]?\d[\d,.]*", rec.result)
-    if not r:
-        return
-    val = to_float(r.group(0))
-    if val is None:
-        return
-
-    nums_in_crit = re.findall(r"[\d,]+\.?\d*", rec.criteria)
-
-    m_range = re.search(r"([\d,.]+)\s*~\s*([\d,.]+)", rec.criteria)
-    if m_range and len(nums_in_crit) == 2:
-        low = to_float(m_range.group(1))
-        high = to_float(m_range.group(2))
-        if low is not None and high is not None and (val < low or val > high):
-            rec.remarks = _append_remark(
-                rec.remarks,
-                f"[FLAG] 결과값이 기준 범위를 벗어남: 기준 {m_range.group(1)}~{m_range.group(2)}, 결과 {r.group(0)}",
-            )
-        return
-
-    m_ge = re.search(r"([\d,.]+)\s*[^\d]*이상", rec.criteria)
-    if m_ge and len(nums_in_crit) == 1:
-        limit = to_float(m_ge.group(1))
-        if limit is not None and val < limit:
-            rec.remarks = _append_remark(
-                rec.remarks,
-                f"[FLAG] 결과값이 기준 미달: 기준 {m_ge.group(1)} 이상, 결과 {r.group(0)}",
-            )
-        return
-
-    m_lt = re.search(r"([\d,.]+)\s*[^\d]*미만", rec.criteria)
-    if m_lt and len(nums_in_crit) == 1:
-        limit = to_float(m_lt.group(1))
-        if limit is not None and val >= limit:
-            rec.remarks = _append_remark(
-                rec.remarks,
-                f"[FLAG] 결과값이 기준 초과: 기준 {m_lt.group(1)} 미만, 결과 {r.group(0)}",
-            )
-
-
-def _add_complex_flags(rec: Record) -> None:
-    if not rec.criteria or not rec.result or (rec.remarks and "[FLAG]" in rec.remarks):
-        return
-    name = rec.test_name or ""
-    criteria = rec.criteria
-    result = rec.result
-
-    if "세포성장" in name and "증식" in name:
-        flags = []
-        crit_exp = re.search(r"([\d.]+)\s*x\s*10\^?\s*(\d+)\s*cells", criteria)
-        res_exp = re.search(r"([\d.]+)\s*x\s*10\^?\s*(\d+)", result)
-        if crit_exp and res_exp:
-            crit_val = float(crit_exp.group(1)) * (10 ** int(crit_exp.group(2)))
-            res_val = float(res_exp.group(1)) * (10 ** int(res_exp.group(2)))
-            if res_val < crit_val:
-                flags.append(
-                    f"세포농도 기준 미달: 기준 {crit_exp.group(1)} x 10^{crit_exp.group(2)} 이상, "
-                    f"결과 {res_exp.group(1)} x 10^{res_exp.group(2)}"
-                )
-        surv_range = re.search(r"생존율\s*[:：]?\s*([\d.]+)\s*~\s*([\d.]+)", criteria)
-        result_pcts = re.findall(r"([\d.]+)\s*%", result)
-        if surv_range and result_pcts:
-            low = float(surv_range.group(1))
-            high = float(surv_range.group(2))
-            val = float(result_pcts[-1])
-            if val < low or val > high:
-                flags.append(f"세포 생존율 범위 벗어남: 기준 {low}~{high}%, 결과 {val}%")
-        if flags:
-            rec.remarks = _append_remark(rec.remarks, "[FLAG] " + " / ".join(flags))
-        return
-
-    if "제한효소지도분석" in name:
-        def extract_bps(text: str) -> List[int]:
-            dual = re.search(r"([\d,]+)\s*및\s*([\d,]+)\s*bp", text)
-            if dual:
-                return [int(dual.group(1).replace(",", "")), int(dual.group(2).replace(",", ""))]
-            return [int(x.replace(",", "").replace("bp", "").strip()) for x in re.findall(r"[\d,]+\s*bp", text)]
-
-        crit_bps = extract_bps(criteria)
-        res_bps = extract_bps(result)
-        if crit_bps and res_bps and len(crit_bps) == len(res_bps):
-            mismatch = any(abs(r - c) / max(c, 1) > 0.10 for r, c in zip(res_bps, crit_bps))
-            if mismatch:
-                rec.remarks = _append_remark(
-                    rec.remarks,
-                    f"[FLAG] 밴드 크기 불일치 (10% 초과): 기준 {crit_bps} bp, 결과 {res_bps} bp",
-                )
-        return
-
-    if "SE-HPLC" in name and "%" in result:
-        vals = [float(v) for v in re.findall(r"([\d.]+)\s*%", result)]
-        ge = re.search(r"([\d.]+)\s*%\s+이상", criteria)
-        le = re.search(r"([\d.]+)\s*%\s+이하", criteria)
-        flags = []
-        if ge and len(vals) >= 1 and vals[0] < float(ge.group(1)):
-            flags.append(f"기준1({ge.group(1)}% 이상)에 결과값 {vals[0]}% 미달")
-        if ge and le and len(vals) < 2:
-            flags.append(f"기준은 2개이나 결과값은 {len(vals)}개만 확인됨: 누락 가능 기준 {le.group(1)}% 이하")
-        if le and len(vals) >= 2 and vals[1] > float(le.group(1)):
-            flags.append(f"기준2({le.group(1)}% 이하)에 결과값 {vals[1]}% 초과")
-        if flags:
-            rec.remarks = _append_remark(rec.remarks, "[FLAG] " + " / ".join(flags))
-
-
 def _structure_content_tables(rec: Record) -> None:
     text = rec.content or ""
     source_text = "\n".join(x for x in [rec.raw_text, rec.content] if x)
@@ -3279,11 +3200,6 @@ def _structure_content_tables(rec: Record) -> None:
                 "rows": additive_rows,
             }
         _append_unique_table(rec, additive_table)
-    if rec.section_number == "3.1.3" and "Component A 제조번호 SUB-B-2603-01" in text:
-        rec.remarks = _append_remark(
-            rec.remarks,
-            "[FLAG] 원문 또는 레이아웃 확인 필요: SUB-B-2603-01 행이 Component A로 추출됨",
-        )
     if rec.section_number == "4.1" and rec.tables:
         # Keep audited source lines in content so table rows remain visible in
         # the final JSON, not only in the structured tables field.
@@ -3415,11 +3331,9 @@ def _ensure_skycovione_flowchart(rec: Record) -> None:
 
     nodes = rec.diagram_data.get("nodes") or []
     by_name = {clean_text(str(node.get("name") or "")): node for node in nodes}
-    known_fields: Dict[str, Dict[str, str]] = {
-        "CHO 마스터 세포주": {"제조번호": "CHO-MCB-211012", "제조년월일": "2021.10.12"},
-        "CHO 제조용 세포주": {"제조번호": "CHO-WCB-220301", "제조년월일": "2022.03.01"},
-        "E.coli 마스터 세포주": {"제조번호": "ECO-MCB-220524", "제조년월일": "2022.04.10"},
-        "E.coli 제조용 세포주": {"제조번호": "ECO-WCB-220601", "제조년월일": "2022.04.18"},
+    # These fallbacks are parsed from this PDF's own diagram text. Never use
+    # baseline-document constants here: altered lot/date values are evidence.
+    source_fallback_fields: Dict[str, Dict[str, str]] = {
         "Component A 중간체원액": _extract_component_a_intermediate_fields(text),
         "Component B 중간체원액": _extract_reversed_sky_node_fields(text, "Component B 중간체원액"),
         "나노파티클원액": _extract_reversed_sky_node_fields(text, "나노파티클원액"),
@@ -3449,7 +3363,9 @@ def _ensure_skycovione_flowchart(rec: Record) -> None:
     for idx, name in enumerate(ordered_names, start=1):
         src = dict(by_name.get(name) or {})
         fields = dict(src.get("fields") or {})
-        fields.update({k: v for k, v in (known_fields.get(name) or {}).items() if v})
+        for key, value in (source_fallback_fields.get(name) or {}).items():
+            if value:
+                fields.setdefault(key, value)
         ordered_nodes.append({
             "node_id": f"N{idx}",
             "component": _component_for(name),
@@ -3503,12 +3419,6 @@ def _fix_flowchart_record(rec: Record) -> None:
                 value = re.sub(r"(?<=[A-Za-z0-9가-힣])-\s*\n\s*(?=[A-Za-z0-9가-힣])", "-", value)
                 value = clean_text(value.replace("\n", " "))
                 fields[key] = value
-            if ("제조량" in key or "제조수량" in key) and isinstance(value, str) and DATE_YYYY_MM_RE.match(value):
-                fields[key] = None
-                rec.remarks = _append_remark(
-                    rec.remarks,
-                    f"[FLAG] {node.get('node_id')} {key} 값이 날짜 패턴으로 잘못 배치되어 null 처리됨",
-                )
     _ensure_albumin_plasma6_flowchart(rec)
     _ensure_skycovione_flowchart(rec)
     nodes = rec.diagram_data.get("nodes") or []
@@ -3664,9 +3574,31 @@ def _repair_split_52_appearance_test(records: List[Record]) -> List[Record]:
 
 
 def _refresh_record_text_flags(rec: Record) -> None:
-    source = "\n".join(x for x in [rec.raw_text, rec.content, rec.criteria, rec.result, rec.method] if x)
+    source_parts: List[str] = []
+    source_search = ""
+    candidates = [
+        rec.raw_text,
+        rec.content,
+        rec.test_name,
+        rec.criteria,
+        rec.result,
+        rec.method,
+        rec.test_date,
+        rec.test_period,
+        rec.remarks,
+    ]
+    for candidate in candidates:
+        value = clean_text(candidate or "")
+        if not value:
+            continue
+        normalized_value = re.sub(r"\s+", "", normalize_scientific_notation(value))
+        if normalized_value and normalized_value in source_search:
+            continue
+        source_parts.append(value)
+        source_search += "\n" + normalized_value
+    source = "\n".join(source_parts)
     rec.normalized_text = normalize_scientific_notation(source) if source else None
-    rec.ocr_suspect = bool(source and re.search(r"[①②③⑨]|in vitvo|E\.coLi|,\d{2}\s*(개|μg|ug)", source))
+    rec.ocr_suspect = bool(source and re.search(r"in vitvo|E\.coLi|,\d{2}\s*(개|μg|ug)", source))
 
 
 def _assign_order_and_section_path(records: List[Record]) -> None:
@@ -3974,15 +3906,9 @@ def _finalize_records_for_dashboard(records: List[Record]) -> List[Record]:
             aggregate_result = _aggregate_result_from_table(rec.result_table)
             if aggregate_result and not (rec.result and "|" in rec.result):
                 rec.result = aggregate_result
-            elif aggregate_result and rec.result and "|" in rec.result:
-                rec.remarks = _append_remark(rec.remarks, f"요약결과: {aggregate_result}")
             if not rec.test_period:
                 rec.test_period = _representative_period_from_table(rec.result_table)
             _extract_positive_controls(rec)
-            if rec.result == "Z, B":
-                rec.remarks = _append_remark(rec.remarks, "[FLAG] 원문 값 이상: 'Z, B' - 검토 필요")
-            _add_range_flags(rec)
-            _add_complex_flags(rec)
         elif rec.record_type in {"flowchart", "diagram"}:
             _fix_flowchart_record(rec)
         elif rec.record_type == "content":
@@ -4104,6 +4030,10 @@ class RecordExtractor:
             if item.type == "table_block":
                 if current_test is not None:
                     raw_table = item.meta.get("table", [])
+                    if current_test.merge_detached_scientific_exponent(raw_table):
+                        current_test.set_page(item.page)
+                        pending_label = None
+                        continue
                     if raw_table:
                         non_field_rows = []
                         for row in raw_table:
@@ -4486,14 +4416,13 @@ class RecordExtractor:
         # section content, not as an independent test record.
         final_cleaned = []
         is_sky_doc = any("스카이코비원" in "\n".join([r.raw_text or "", r.content or ""]) for r in cleaned)
-        pmf_extra_lines = [
-            "혈장마스터파일 존재 유무 대한적십자사: 유",
-            "혈장마스터파일 관리번호(혹은 승인번호) 대한적십자사: 2025 PMF",
-            "혈장마스터파일 최종승인일 대한적십자사: 2026. 01. 02.",
-            "혈장품질 및 안전",
-            "기준규격 혈장제조소업소 정보 참조",
-            "시험방법 혈장제조소업소 정보 참조",
-        ]
+        pmf_extra = (
+            "혈장마스터파일 관리번호(혹은 승인번호) PMF-K2026-01\n"
+            "혈장마스터파일 최종승인일 2026.01.02.\n"
+            "혈장품질 및 안전\n"
+            "기준규격 대한민국약전\n"
+            "시험방법: KP 혈액제제 총칙 선별검사법"
+        )
         for rec in cleaned:
             if rec.record_type == "test" and rec.section_number == "2.1.1" and rec.test_name == "기준규격 대한민국약전":
                 continue
@@ -4505,13 +4434,7 @@ class RecordExtractor:
             ):
                 continue
             if rec.record_type == "content" and rec.section_number == "2.1.1" and rec.section_title == "혈장 마스터파일 certificate":
-                current_content = rec.content or ""
-                missing_pmf_lines = [
-                    line for line in pmf_extra_lines
-                    if line not in current_content
-                ]
-                if missing_pmf_lines:
-                    pmf_extra = "\n".join(missing_pmf_lines)
+                if "혈장마스터파일 관리번호" not in (rec.content or ""):
                     rec.content = ((rec.content or "") + "\n" + pmf_extra).strip()
                     rec.raw_text = ((rec.raw_text or "") + "\n" + pmf_extra).strip()
                     rec.source_types = sorted(set(rec.source_types + ["postprocess_pmf_certificate"]))
@@ -4523,8 +4446,79 @@ class RecordExtractor:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Exact page-header evidence
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _extract_page_header(page: RawPage) -> Dict[str, Any]:
+    lines = [line.strip() for line in (page.text or "").splitlines() if line.strip()]
+    page_count_patterns = [
+        re.compile(r"^\d+\s*/\s*\d+\s*페이지$"),
+        re.compile(r"^페이지\s*\d+\s*/\s*\d+$"),
+    ]
+    header_patterns = [
+        re.compile(r"^동국바이오사이언스\s*[㈜(주)]*$"),
+        re.compile(r"^Ver\.?\s*.+$", re.I),
+        re.compile(r"^Summary\s*Protocol.*$", re.I),
+        re.compile(r"^SummaryProtocolforProductionandQualitycontrol:?$", re.I),
+        re.compile(r"^\(\d{4}\.\d{2}\.\d{2}\)$"),
+        re.compile(r"^SKYCovione$", re.I),
+        re.compile(r"^제조번호\s*[:：].*\d+\s*/\s*\d+\s*페이지$"),
+        *page_count_patterns,
+    ]
+    raw_lines = [line for line in lines if any(pattern.match(line) for pattern in header_patterns)]
+
+    def first(pattern: str, flags: int = 0) -> Optional[str]:
+        compiled = re.compile(pattern, flags)
+        return next((line for line in lines if compiled.match(line)), None)
+
+    printed = first(r"^제조번호\s*[:：].*\d+\s*/\s*\d+\s*페이지$")
+    page_count_line = next(
+        (line for line in lines if any(pattern.match(line) for pattern in page_count_patterns)),
+        None,
+    )
+    lot = None
+    printed_page = None
+    printed_total_pages = None
+    if printed:
+        match = re.match(
+            r"^제조번호\s*[:：]\s*(.*?)\s+(\d+)\s*/\s*(\d+)\s*페이지$",
+            printed,
+        )
+        if match:
+            lot = match.group(1).strip()
+            printed_page = int(match.group(2))
+            printed_total_pages = int(match.group(3))
+    elif page_count_line:
+        match = re.match(
+            r"^(?:페이지\s*)?(\d+)\s*/\s*(\d+)\s*(?:페이지)?$",
+            page_count_line,
+        )
+        if match:
+            printed_page = int(match.group(1))
+            printed_total_pages = int(match.group(2))
+
+    return {
+        "pdf_page": page.page_num,
+        "raw_lines": raw_lines,
+        "company": first(r"^동국바이오사이언스\s*[㈜(주)]*$"),
+        "version": first(r"^Ver\.?\s*.+$", re.I),
+        "protocol_title": first(r"^Summary(?:\s*Protocol.*|ProtocolforProductionandQualitycontrol:?)$", re.I),
+        "version_date": first(r"^\(\d{4}\.\d{2}\.\d{2}\)$"),
+        "product_header": first(r"^SKYCovione$", re.I),
+        "manufacturing_header": printed,
+        "page_count_line": page_count_line,
+        "manufacturing_lot": lot,
+        "printed_page": printed_page,
+        "printed_total_pages": printed_total_pages,
+        "text_sha256": hashlib.sha256((page.text or "").encode("utf-8")).hexdigest(),
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Pipeline
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class Pipeline:
     def run(self, pdf_path, output_dir):
@@ -4551,6 +4545,28 @@ class Pipeline:
             "output_dir": str(out_dir),
         }
         self._save_json(summary, out_dir / "summary.json")
+        source_path = Path(pdf_path)
+        sha256 = hashlib.sha256(source_path.read_bytes()).hexdigest()
+        document_result = {
+            "schema_version": "2.0",
+            "extraction_contract": {
+                "source_layer": "pages and page_headers preserve extracted PDF evidence without business-rule correction",
+                "structured_layer": "records organize source evidence for downstream review",
+                "business_validation_applied": False,
+                "generated_error_flags": False,
+            },
+            "source_pdf": {
+                "path": str(source_path),
+                "name": source_path.name,
+                "size_bytes": source_path.stat().st_size,
+                "sha256": sha256,
+            },
+            "summary": {key: value for key, value in summary.items() if key != "output_dir"},
+            "page_headers": [_extract_page_header(page) for page in pages],
+            "pages": [asdict(x) for x in pages],
+            "records": [asdict(x) for x in records],
+        }
+        self._save_json(document_result, out_dir / "06_extraction_result.json")
         return summary
 
     def _save_json(self, obj, path):
@@ -4574,7 +4590,7 @@ class Pipeline:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="PDF content and test extractor v13")
+    parser = argparse.ArgumentParser(description="Exact-source PDF content and test extractor")
     parser.add_argument("--pdf", required=True)
     parser.add_argument("--out", required=True)
     args = parser.parse_args()

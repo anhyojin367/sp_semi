@@ -1,21 +1,24 @@
 from __future__ import annotations
 
-import json
 import os
-import re
 from pathlib import Path
 from typing import Optional
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
-from .config import BASE_DIR, DEFAULT_GEMINI_MODEL, GEMINI_API_KEY, FAIL_LABEL, HOLD_LABEL, PASS_LABEL
+from .clova_client import create_clova_client, request_structured_response
+from .config import (
+    BASE_DIR,
+    CLOVA_API_KEY,
+    CLOVA_BASE_URL,
+    CLOVA_MAX_COMPLETION_TOKENS,
+    DEFAULT_CLOVA_MODEL,
+    FAIL_LABEL,
+    HOLD_LABEL,
+    PASS_LABEL,
+)
 from .utils import clean_text
-
-try:
-    from google import genai
-except Exception:
-    genai = None
 
 
 class JudgeResponse(BaseModel):
@@ -25,7 +28,7 @@ class JudgeResponse(BaseModel):
     normalized_result: str | None = None
 
 
-class GeminiJudgeClient:
+class ClovaJudgeClient:
     def __init__(
         self,
         api_key: Optional[str] = None,
@@ -36,25 +39,28 @@ class GeminiJudgeClient:
         load_dotenv(Path(BASE_DIR) / ".env", override=True)
         load_dotenv(override=True)
 
-        env_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or GEMINI_API_KEY
-        env_model = os.getenv("GEMINI_MODEL") or DEFAULT_GEMINI_MODEL
+        env_key = os.getenv("CLOVA_API_KEY") or CLOVA_API_KEY
+        env_model = os.getenv("CLOVA_MODEL") or DEFAULT_CLOVA_MODEL
+        env_base_url = os.getenv("CLOVA_BASE_URL") or CLOVA_BASE_URL
 
         self.api_key = (api_key or env_key or "").strip()
-        self.model = (model or env_model or "gemini-2.5-flash").strip()
-        if self.api_key in {"여기에_제미나이_API키", "YOUR_GEMINI_API_KEY", "YOUR_API_KEY"}:
+        self.model = (model or env_model or "HCX-007").strip()
+        self.base_url = env_base_url.strip()
+        self.max_completion_tokens = CLOVA_MAX_COMPLETION_TOKENS
+        if self.api_key in {"YOUR_CLOVA_API_KEY", "YOUR_API_KEY"}:
             self.api_key = ""
-        self.enabled = bool(self.api_key and genai is not None)
         self.client = None
+        self.enabled = False
         self.call_count = 0
         self.success_count = 0
         self.last_error = ""
         self.domain_detail_context = clean_text(domain_detail_context)
-        if self.enabled:
+        if self.api_key:
             try:
-                self.client = genai.Client(api_key=self.api_key)
+                self.client = create_clova_client(self.api_key, self.base_url)
+                self.enabled = self.client is not None
             except Exception as exc:
-                self.enabled = False
-                self.last_error = f"Gemini client init failed: {exc}"
+                self.last_error = f"CLOVA client init failed: {exc}"
 
     def set_domain_detail_context(self, context: str | None) -> None:
         self.domain_detail_context = clean_text(context)
@@ -145,46 +151,35 @@ class GeminiJudgeClient:
 
         try:
             self.call_count += 1
-            response = self.client.models.generate_content(
+            result = request_structured_response(
+                client=self.client,
                 model=self.model,
-                contents=prompt,
-                config={
-                    "response_mime_type": "application/json",
-                    "response_schema": JudgeResponse,
-                },
+                prompt=prompt,
+                response_model=JudgeResponse,
+                max_completion_tokens=self.max_completion_tokens,
+                use_schema=True,
             )
-            parsed = getattr(response, "parsed", None)
-            if parsed:
-                self.success_count += 1
-                if isinstance(parsed, JudgeResponse):
-                    return parsed
-                if isinstance(parsed, dict):
-                    return JudgeResponse(**parsed)
-
-            text = clean_text(getattr(response, "text", ""))
-            if text:
-                self.success_count += 1
-                return JudgeResponse(**json.loads(text))
+            self.success_count += 1
+            return result
         except Exception as exc:
             self.last_error = str(exc)
             print(f"[LLM_JUDGE_ERROR] {exc}")
 
-            # 일부 google-genai 버전/모델 조합에서는 response_schema가 실패할 수 있어
-            # 같은 프롬프트를 JSON mime만으로 한 번 더 시도한다.
+            # Structured Outputs를 지원하지 않는 API 구성에서도 같은 JSON 프롬프트로
+            # 한 번 더 시도한다.
             try:
                 self.call_count += 1
-                response = self.client.models.generate_content(
+                result = request_structured_response(
+                    client=self.client,
                     model=self.model,
-                    contents=prompt,
-                    config={"response_mime_type": "application/json"},
+                    prompt=prompt,
+                    response_model=JudgeResponse,
+                    max_completion_tokens=self.max_completion_tokens,
+                    use_schema=False,
                 )
-                text = clean_text(getattr(response, "text", ""))
-                if text:
-                    match = re.search(r"\{.*\}", text, flags=re.S)
-                    payload = match.group(0) if match else text
-                    self.success_count += 1
-                    self.last_error = ""
-                    return JudgeResponse(**json.loads(payload))
+                self.success_count += 1
+                self.last_error = ""
+                return result
             except Exception as retry_exc:
                 self.last_error = str(retry_exc)
                 print(f"[LLM_JUDGE_RETRY_ERROR] {retry_exc}")
