@@ -1202,6 +1202,11 @@ PRODUCT_UNIT_PATTERN = re.compile(
     re.I,
 )
 
+GENERIC_EXTERNAL_CRITERIA_RE = re.compile(
+    r"(허가서|허가사항|허가조건|승인사항|기준서|별도\s*기준).*(따름|준함|참조)|"
+    r"(따름|준함|참조).*(허가서|허가사항|허가조건|승인사항|기준서|별도\s*기준)"
+)
+
 
 def _looks_like_date_context(text: str, start: int, end: int) -> bool:
     before = text[max(0, start - 12):start]
@@ -1646,6 +1651,616 @@ def _build_sky_covione_required_unit_evaluation(
     )
 
 
+def _join_eval_text(ev: Evaluation) -> str:
+    return "\n".join(
+        clean_text(getattr(ev, attr, ""))
+        for attr in [
+            "test_name",
+            "method",
+            "criteria",
+            "result",
+            "test_date",
+            "test_period",
+            "remarks",
+            "raw_text",
+        ]
+        if clean_text(getattr(ev, attr, ""))
+    )
+
+
+def _result_text(ev: Evaluation) -> str:
+    return clean_text(getattr(ev, "result", "")) or clean_text(getattr(ev, "raw_text", ""))
+
+
+def _has_generic_external_criteria(ev: Evaluation) -> bool:
+    return bool(GENERIC_EXTERNAL_CRITERIA_RE.search(clean_text(getattr(ev, "criteria", ""))))
+
+
+def _has_suitable_text(text: str) -> bool:
+    text = clean_text(text)
+    key = _norm_match(text)
+
+    if not text:
+        return False
+
+    if "부적합" in text:
+        return False
+
+    return (
+        "적합" in text
+        or "음성" in text
+        or "불검출" in text
+        or "미검출" in text
+        or "없음" in text
+        or "인정되지않" in key
+        or "관찰되지않" in key
+        or "확인되지않" in key
+        or "증식하지않" in key
+        or "발육하지않" in key
+    )
+
+
+def _has_unsuitable_text(text: str) -> bool:
+    text = clean_text(text)
+    key = _norm_match(text)
+
+    if not text:
+        return False
+
+    negative_guard = any(
+        guard in key
+        for guard in ["인정되지않", "관찰되지않", "확인되지않", "증식하지않", "발육하지않"]
+    )
+
+    if "부적합" in text or "양성" in text:
+        return True
+
+    if negative_guard:
+        return False
+
+    return any(token in key for token in ["검출", "확인됨", "관찰됨", "인정됨", "증식", "발육"])
+
+
+def _date_values_from_text(text: str) -> list[date]:
+    dates: list[date] = []
+    for match in re.finditer(
+        r"20\d{2}(?:\s*[.\-/년]\s*\d{1,2})(?:\s*[.\-/월]\s*\d{1,2})?",
+        clean_text(text),
+    ):
+        parsed = _parse_date_value(match.group(0))
+        if parsed is not None:
+            dates.append(parsed)
+    return dates
+
+
+def _duration_days_from_evaluation(ev: Evaluation) -> int | None:
+    text = "\n".join(
+        clean_text(getattr(ev, attr, ""))
+        for attr in ["test_period", "test_date", "raw_text"]
+        if clean_text(getattr(ev, attr, ""))
+    )
+    dates = _date_values_from_text(text)
+
+    if len(dates) < 2:
+        return None
+
+    return (max(dates) - min(dates)).days + 1
+
+
+def _extract_float_values(text: str | None) -> list[float]:
+    values: list[float] = []
+    text = clean_text(text)
+    if not text:
+        return values
+
+    for match in re.finditer(r"[-+]?\d+(?:\.\d+)?", text.replace(",", "")):
+        try:
+            values.append(float(match.group(0)))
+        except ValueError:
+            continue
+
+    return values
+
+
+def _set_general_method_decision(
+    ev: Evaluation,
+    *,
+    status: str,
+    standard: str,
+    reason: str,
+) -> None:
+    ev.final_status = status
+    ev.reason = reason
+    ev.normalized_criteria = standard
+    ev.normalized_result = clean_text(getattr(ev, "result", ""))
+    ev.source = "general_test_method_rule"
+    ev.comparison_completed = True
+
+
+def _evaluate_absence_rule(
+    ev: Evaluation,
+    *,
+    standard: str,
+    target: str,
+    min_days: int | None = None,
+) -> tuple[str, str] | None:
+    result_text = _result_text(ev)
+    duration_days = _duration_days_from_evaluation(ev)
+
+    if min_days is not None and duration_days is not None and duration_days < min_days:
+        return (
+            FAIL_LABEL,
+            f"{target}은 시험기간이 {min_days}일 이상이어야 하나 확인된 시험기간이 {duration_days}일이므로 불충족으로 판단했습니다.",
+        )
+
+    if _has_unsuitable_text(result_text):
+        return (
+            FAIL_LABEL,
+            f"{target}에서 검출/증식/발육 등 부적합 표현이 확인되어 불충족으로 판단했습니다.",
+        )
+
+    if _has_suitable_text(result_text):
+        period_text = f" 시험기간 {duration_days}일도 확인되었습니다." if duration_days is not None else ""
+        return (
+            PASS_LABEL,
+            f"{standard}에 따라 {target}이 확인되지 않는 경우 적합하며, 시험결과에서 해당 부정 표현이 확인되었습니다.{period_text} 충족으로 판단했습니다.",
+        )
+
+    if _has_generic_external_criteria(ev):
+        return (
+            HOLD_LABEL,
+            f"{standard} 적용 대상이나 시험결과에서 {target}의 검출/부정 여부를 명확히 확인하지 못해 보류로 판단했습니다.",
+        )
+
+    return None
+
+
+def _evaluate_pyrogen_rule(ev: Evaluation) -> tuple[str, str] | None:
+    text = _result_text(ev)
+    values = _extract_float_values(text)
+
+    if not values:
+        if _has_suitable_text(text):
+            return PASS_LABEL, "발열성물질시험 결과가 적합으로 기재되어 충족으로 판단했습니다."
+        if _has_unsuitable_text(text):
+            return FAIL_LABEL, "발열성물질시험 결과가 부적합 또는 양성으로 기재되어 불충족으로 판단했습니다."
+        return None
+
+    max_value = max(values)
+    if max_value <= 1.3:
+        return PASS_LABEL, f"발열성물질시험에서 확인된 반응 합계 최대값이 {max_value:g}°C로 1.3°C 이하이므로 충족으로 판단했습니다."
+    if max_value >= 2.5:
+        return FAIL_LABEL, f"발열성물질시험에서 확인된 반응 합계 최대값이 {max_value:g}°C로 2.5°C 이상이므로 불충족으로 판단했습니다."
+    return HOLD_LABEL, f"발열성물질시험 반응 합계 {max_value:g}°C가 1.3°C 초과 2.5°C 미만 구간이라 자동 확정하지 않고 보류로 판단했습니다."
+
+
+def _evaluate_range_rule(ev: Evaluation, *, low: float, high: float, label: str, unit: str = "") -> tuple[str, str] | None:
+    values = _extract_float_values(_result_text(ev))
+    if not values:
+        return None
+
+    value = values[0]
+    unit_text = f" {unit}" if unit else ""
+    if low <= value <= high:
+        return PASS_LABEL, f"{label} 결과값 {value:g}{unit_text}이 기준 범위 {low:g}~{high:g}{unit_text} 안에 있어 충족으로 판단했습니다."
+    return FAIL_LABEL, f"{label} 결과값 {value:g}{unit_text}이 기준 범위 {low:g}~{high:g}{unit_text}를 벗어나 불충족으로 판단했습니다."
+
+
+def _evaluate_max_rule(ev: Evaluation, *, maximum: float, label: str) -> tuple[str, str] | None:
+    values = _extract_float_values(_result_text(ev))
+    if not values:
+        return None
+
+    value = values[0]
+    if value <= maximum:
+        return PASS_LABEL, f"{label} 결과값 {value:g}이 기준 {maximum:g} 이하이므로 충족으로 판단했습니다."
+    return FAIL_LABEL, f"{label} 결과값 {value:g}이 기준 {maximum:g}을 초과하여 불충족으로 판단했습니다."
+
+
+def _selected_large_volume_particle_rule(ev: Evaluation) -> bool | None:
+    criteria = clean_text(getattr(ev, "criteria", ""))
+    compact = re.sub(r"\s+", "", criteria)
+
+    if not compact:
+        return None
+
+    large_markers = [
+        "■100mL이상",
+        "☑100mL이상",
+        "[x]100mL이상",
+        "100mL이상",
+    ]
+    small_selected_markers = [
+        "■100mL미만",
+        "☑100mL미만",
+        "[x]100mL미만",
+    ]
+
+    if any(marker.replace(" ", "") in compact for marker in small_selected_markers):
+        return False
+
+    if any(marker.replace(" ", "") in compact for marker in large_markers):
+        return True
+
+    return None
+
+
+def _extract_particle_result_counts(text: str | None) -> dict[int, float]:
+    text = clean_text(text).replace("㎛", "μm").replace("um", "μm")
+    counts: dict[int, float] = {}
+
+    patterns = [
+        r"(?P<size>10|25)\s*μm\s*이상[^0-9]{0,20}(?P<count>\d+(?:\.\d+)?)",
+        r"(?P<size>10|25)\s*um\s*이상[^0-9]{0,20}(?P<count>\d+(?:\.\d+)?)",
+        r"(?P<count>\d+(?:\.\d+)?)\s*(?:EA|개)\s*/?\s*(?:mL|ml|vial)?[^0-9]{0,20}(?P<size>10|25)\s*μm",
+    ]
+
+    for pattern in patterns:
+        for match in re.finditer(pattern, text, re.I):
+            try:
+                size = int(match.group("size"))
+                count = float(match.group("count"))
+            except (TypeError, ValueError):
+                continue
+
+            counts[size] = count
+
+    return counts
+
+
+def _evaluate_insoluble_particle_rule(ev: Evaluation) -> tuple[str, str] | None:
+    selected_large = _selected_large_volume_particle_rule(ev)
+    result_text = _result_text(ev)
+    result_key = _norm_match(result_text)
+
+    if _has_unsuitable_text(result_text) or "기준초과" in result_key:
+        return FAIL_LABEL, "주사제의 불용성미립자시험 결과가 기준 초과 또는 부적합으로 확인되어 불충족으로 판단했습니다."
+
+    if selected_large is False:
+        return HOLD_LABEL, "주사제의 불용성미립자시험 기준에서 100 mL 미만 단계가 선택되어 있어 해당 단계 기준의 상세 판정이 필요합니다."
+
+    if selected_large is True:
+        counts = _extract_particle_result_counts(result_text)
+        limits = {10: 25.0, 25: 3.0}
+        failures = [
+            f"{size} μm 이상 {counts[size]:g} EA/mL > {limit:g} EA/mL"
+            for size, limit in limits.items()
+            if size in counts and counts[size] > limit
+        ]
+
+        if failures:
+            return (
+                FAIL_LABEL,
+                "100 mL 이상 주사제 기준을 적용했을 때 불용성미립자 결과가 기준을 초과하여 불충족으로 판단했습니다: "
+                + "; ".join(failures),
+            )
+
+        if counts:
+            checked = ", ".join(
+                f"{size} μm 이상 {counts[size]:g} EA/mL"
+                for size in sorted(counts)
+            )
+            return (
+                PASS_LABEL,
+                f"시험기준에서 100 mL 이상 단계가 선택되어 해당 기준만 적용했습니다. 확인된 결과({checked})가 100 mL 이상 기준(10 μm 이상 25 EA/mL 이하, 25 μm 이상 3 EA/mL 이하)을 만족하여 충족으로 판단했습니다.",
+            )
+
+        if _has_suitable_text(result_text):
+            return (
+                PASS_LABEL,
+                "시험기준에서 100 mL 이상 단계가 선택되어 해당 기준만 적용했고, 시험결과가 적합으로 기재되어 충족으로 판단했습니다.",
+            )
+
+        return (
+            HOLD_LABEL,
+            "시험기준에서 100 mL 이상 단계가 선택되었으나 시험결과에서 10 μm/25 μm 입자수를 자동 확인하지 못해 보류로 판단했습니다.",
+        )
+
+    if _has_suitable_text(result_text):
+        return PASS_LABEL, "주사제의 불용성미립자시험 결과가 기준에 적합한 것으로 확인되어 충족으로 판단했습니다."
+
+    return None
+
+
+def _apply_general_test_method_rules(evaluations: list[Evaluation]) -> dict:
+    applied: list[dict] = []
+
+    for ev in evaluations:
+        if clean_text(getattr(ev, "record_type", "")) != "test":
+            continue
+        if clean_text(getattr(ev, "source", "")) == "general_test_method_rule":
+            continue
+
+        text = _join_eval_text(ev)
+        key = _norm_match(text)
+        test_key = _norm_match(getattr(ev, "test_name", ""))
+        decision: tuple[str, str] | None = None
+        standard = ""
+
+        if "결핵균부정시험" in key:
+            standard = "결핵균부정시험법: 6주 이상 관찰하며 결핵균의 발육이 인정되지 않을 때 적합"
+            decision = _evaluate_absence_rule(ev, standard=standard, target="결핵균 발육", min_days=42)
+        elif "마이코플라스마부정시험" in key:
+            standard = "마이코플라스마부정시험: 직접도말배양법 14일 이상, 증균배양법/멤브레인필터법 28일 이상이며 마이코플라스마 증식이 인정되지 않을 때 적합"
+            min_days = 28 if any(token in key for token in ["증균배양", "멤브레인필터", "멤브레인"]) else 14
+            decision = _evaluate_absence_rule(ev, standard=standard, target="마이코플라스마 증식", min_days=min_days)
+        elif "무균시험" in key:
+            standard = "무균시험법: 멤브레인필터법 또는 직접법 14일 이상이며 균 또는 미생물의 발육/증식이 인정되지 않을 때 적합"
+            decision = _evaluate_absence_rule(ev, standard=standard, target="균 또는 미생물의 발육", min_days=14)
+        elif "발열성물질시험" in key:
+            standard = "발열성물질시험법: 3마리 반응 합계가 1.3°C 이하이면 음성(적합), 2.5°C 이상이면 양성(부적합)"
+            decision = _evaluate_pyrogen_rule(ev)
+        elif "열안정성시험" in key:
+            standard = "열안정성시험법: 제1법은 가온 전후 검체 차이가 없어야 하며, 제2법은 가온 후 검체가 겔화되면 안 됨"
+            decision = _evaluate_absence_rule(ev, standard=standard, target="가온 전후 차이 또는 겔화")
+        elif "치메로살정량" in key or "치메로살" in test_key:
+            standard = "치메로살정량법: 별도 규정이 없는 한 허가받은 기준에 적합해야 하며 최종원액 치메로살 함량은 제품 표시량의 80~120%"
+            decision = _evaluate_range_rule(ev, low=80, high=120, label="치메로살정량법", unit="%")
+            if decision is None and _has_suitable_text(_result_text(ev)):
+                decision = PASS_LABEL, "치메로살정량법 결과가 허가받은 기준에 적합한 것으로 기재되어 충족으로 판단했습니다."
+        elif "폐놀정량" in key or "페놀정량" in key:
+            standard = "폐놀정량법: 별도 규정이 없는 한 폐놀 함량은 0.45~0.55 w/v%"
+            decision = _evaluate_range_rule(ev, low=0.45, high=0.55, label="폐놀정량법", unit="w/v%")
+        elif "헴정량" in key or "혈색소" in key:
+            standard = "헴정량법: 검체의 흡광도는 0.25 이하"
+            decision = _evaluate_max_rule(ev, maximum=0.25, label="헴정량법")
+        elif "형광항체시험" in key:
+            standard = "형광항체시험법: 음성대조, 양성대조와 비교하여 형광이 존재하는 경우 양성으로 판정하고 적합"
+            result_text = _result_text(ev)
+            if _has_suitable_text(result_text) or "양성" in result_text or "형광" in result_text:
+                decision = PASS_LABEL, "형광항체시험 결과가 양성대조/음성대조 비교 기준에 따라 적합한 것으로 확인되어 충족으로 판단했습니다."
+        elif "불용성미립자" in key:
+            standard = "주사제의 불용성미립자시험: 광차폐입자계수법 또는 현미경입자계수법의 용량별 10 μm/25 μm 입자수 기준을 만족해야 함"
+            decision = _evaluate_insoluble_particle_rule(ev)
+        elif "불용성이물" in key:
+            standard = "불용성이물시험: 주사제 제1법 및 제2법 모두 불용성 이물이 없음"
+            decision = _evaluate_absence_rule(ev, standard=standard, target="불용성 이물")
+        elif "실용량시험" in key:
+            standard = "주사제의 실용량시험법: 표시량 이상이어야 함"
+            result_text = _result_text(ev)
+            result_key = _norm_match(result_text)
+            if "표시량이상" in result_key or _has_suitable_text(result_text):
+                decision = PASS_LABEL, "주사제의 실용량시험 결과가 표시량 이상 또는 적합으로 확인되어 충족으로 판단했습니다."
+            elif "표시량미만" in result_key or _has_unsuitable_text(result_text):
+                decision = FAIL_LABEL, "주사제의 실용량시험 결과가 표시량 미만 또는 부적합으로 확인되어 불충족으로 판단했습니다."
+        elif "엔도톡신" in key:
+            standard = "엔도톡신시험법: 생물학적제제 각조에서 규정하는 엔도톡신 기준을 초과해서는 안 됨"
+            result_text = _result_text(ev)
+            result_key = _norm_match(result_text)
+            if "초과" in result_key or _has_unsuitable_text(result_text):
+                decision = FAIL_LABEL, "엔도톡신시험 결과가 기준 초과 또는 부적합으로 확인되어 불충족으로 판단했습니다."
+            elif _has_suitable_text(result_text):
+                decision = PASS_LABEL, "엔도톡신시험 결과가 기준 이하 또는 적합으로 확인되어 충족으로 판단했습니다."
+
+        if decision is None:
+            continue
+
+        status, reason = decision
+        _set_general_method_decision(
+            ev,
+            status=status,
+            standard=standard,
+            reason=reason,
+        )
+        applied.append(
+            {
+                "test_name": clean_text(getattr(ev, "test_name", "")),
+                "status": status,
+                "standard": standard,
+            }
+        )
+
+    return {"applied_count": len(applied), "applied": applied}
+
+
+def _general_method_priority_evaluation(record) -> tuple[Evaluation | None, dict]:
+    ev = Evaluation(
+        order_idx=getattr(record, "order_idx", 0),
+        record_type=getattr(record, "record_type", "test"),
+        section_number=getattr(record, "section_number", None),
+        section_title=getattr(record, "section_title", None),
+        test_name=(
+            clean_text(getattr(record, "test_name", ""))
+            or clean_text(getattr(record, "section_title", ""))
+            or (clean_text(getattr(record, "raw_text", "")).split("\n")[0] if clean_text(getattr(record, "raw_text", "")) else "")
+            or "항목"
+        ),
+        content_label=getattr(record, "content_label", None),
+        content=getattr(record, "content", None),
+        criteria=getattr(record, "criteria", None),
+        result=getattr(record, "result", None),
+        method=getattr(record, "method", None),
+        test_date=getattr(record, "test_date", None),
+        test_period=getattr(record, "test_period", None),
+        remarks=getattr(record, "remarks", None),
+        page_start=getattr(record, "page_start", 0),
+        page_end=getattr(record, "page_end", 0),
+        raw_text=getattr(record, "raw_text", "") or "",
+    )
+    meta = _apply_general_test_method_rules([ev])
+    if meta.get("applied_count"):
+        return ev, meta
+    return None, meta
+
+
+FINAL_SIGNATURE_LABEL_RE = re.compile(
+    r"(최종\s*)?(확인\s*/\s*서명일|확인\s*서명일|서명일자|최종\s*서명일자|최종\s*확인일|최종\s*승인일)"
+    r"\s*[:：]?\s*"
+    r"(?P<date>20\d{2}\s*[.\-/년]\s*\d{1,2}(?:\s*[.\-/월]\s*\d{1,2})?\.?)"
+)
+
+
+def _dates_from_evaluation(ev: Evaluation) -> list[date]:
+    text = "\n".join(
+        clean_text(getattr(ev, attr, ""))
+        for attr in ["test_period", "test_date", "raw_text"]
+        if clean_text(getattr(ev, attr, ""))
+    )
+    return _date_values_from_text(text)
+
+
+def _is_finished_product_test_evaluation(ev: Evaluation) -> bool:
+    section_number = clean_text(getattr(ev, "section_number", ""))
+    text = _join_eval_text(ev)
+    key = _norm_match(text)
+
+    if section_number.startswith("5.2"):
+        return True
+
+    if any(token in key for token in ["완제의약품", "완제품", "완제"]):
+        if "정보" not in key or "시험" in key:
+            return True
+
+    return False
+
+
+def _extract_final_signature_dates(records: list) -> list[dict]:
+    out: list[dict] = []
+
+    for record in records:
+        text = "\n".join(
+            clean_text(getattr(record, attr, ""))
+            for attr in ["content", "raw_text", "remarks", "normalized_text"]
+            if clean_text(getattr(record, attr, ""))
+        )
+        if not text:
+            continue
+
+        for match in FINAL_SIGNATURE_LABEL_RE.finditer(text):
+            parsed = _parse_date_value(match.group("date"))
+            if parsed is None:
+                continue
+            out.append(
+                {
+                    "date": parsed,
+                    "date_text": match.group("date"),
+                    "source": _record_display_name(record),
+                    "page": getattr(record, "page_start", None),
+                }
+            )
+
+    return out
+
+
+def _build_final_signature_after_finished_tests_evaluation(
+    *,
+    records: list,
+    evaluations: list[Evaluation],
+    order_idx: int,
+) -> tuple[Evaluation, dict]:
+    criteria = "문서의 최종 서명일자는 완제품에 대한 모든 시험이 완료된 날짜 이후여야 합니다."
+    signature_dates = _extract_final_signature_dates(records)
+    finished_test_dates: list[dict] = []
+
+    for ev in evaluations:
+        if clean_text(getattr(ev, "record_type", "")) != "test":
+            continue
+
+        if not _is_finished_product_test_evaluation(ev):
+            continue
+
+        dates = _dates_from_evaluation(ev)
+        if not dates:
+            continue
+
+        finished_test_dates.append(
+            {
+                "test_name": clean_text(getattr(ev, "test_name", "")) or "완제품 시험",
+                "section_number": clean_text(getattr(ev, "section_number", "")),
+                "completed_date": max(dates),
+                "raw_date": clean_text(getattr(ev, "test_period", "")) or clean_text(getattr(ev, "test_date", "")),
+            }
+        )
+
+    if not signature_dates:
+        result = "최종 서명일자 미확인"
+        reason = "문서에서 최종 확인/서명일 또는 최종 서명일자를 자동 확인하지 못해 보류로 판단했습니다."
+        status = HOLD_LABEL
+    elif not finished_test_dates:
+        result = "완제품 시험 완료일 미확인"
+        reason = "완제품에 대한 시험 완료일자를 자동 확인하지 못해 최종 서명일자와 비교하지 못했습니다."
+        status = HOLD_LABEL
+    else:
+        final_signature = max(item["date"] for item in signature_dates)
+        latest_finished_test = max(item["completed_date"] for item in finished_test_dates)
+
+        if final_signature >= latest_finished_test:
+            result = (
+                f"최종 서명일자 {final_signature.isoformat()} / "
+                f"완제품 최종 시험 완료일 {latest_finished_test.isoformat()}"
+            )
+            reason = (
+                "문서의 최종 서명일자가 완제품에 대한 모든 시험 완료일 이후로 확인되어 충족으로 판단했습니다."
+            )
+            status = PASS_LABEL
+        else:
+            result = (
+                f"최종 서명일자 {final_signature.isoformat()} / "
+                f"완제품 최종 시험 완료일 {latest_finished_test.isoformat()}"
+            )
+            late_tests = [
+                item
+                for item in finished_test_dates
+                if item["completed_date"] > final_signature
+            ]
+            reason_lines = [
+                "문서의 최종 서명일자가 완제품 시험 완료일보다 빠른 항목이 있어 불충족으로 판단했습니다.",
+            ]
+            for item in sorted(late_tests, key=lambda row: row["completed_date"], reverse=True)[:8]:
+                reason_lines.append(
+                    f"- {item['section_number']} {item['test_name']}: 시험 완료일 {item['completed_date'].isoformat()}"
+                )
+            reason = "\n".join(reason_lines)
+            status = FAIL_LABEL
+
+    return (
+        _make_structural_evaluation(
+            order_idx=order_idx,
+            section_number="C.1",
+            test_name="최종 서명일자와 완제품 시험 완료일 순서 확인",
+            criteria=criteria,
+            result=result,
+            final_status=status,
+            reason=reason,
+            record_type="temporal_sequence_validation",
+            section_title="공정 및 시간적 순서 확인 로직",
+            source="temporal_sequence_rule",
+        ),
+        {
+            "signature_dates": [
+                {
+                    **item,
+                    "date": item["date"].isoformat(),
+                }
+                for item in signature_dates
+            ],
+            "finished_product_test_dates": [
+                {
+                    **item,
+                    "completed_date": item["completed_date"].isoformat(),
+                }
+                for item in finished_test_dates
+            ],
+        },
+    )
+
+
+def _build_temporal_sequence_evaluations(
+    *,
+    records: list,
+    evaluations: list[Evaluation],
+    start_order_idx: int,
+) -> tuple[list[Evaluation], dict]:
+    signature_eval, signature_meta = _build_final_signature_after_finished_tests_evaluation(
+        records=records,
+        evaluations=evaluations,
+        order_idx=start_order_idx,
+    )
+    return [signature_eval], {
+        "final_signature_after_finished_product_tests": signature_meta,
+    }
+
+
 def _build_numeric_precision_evaluations(
     *,
     detail_profile: DomainDetailProfile,
@@ -1805,10 +2420,27 @@ class DocumentJudgePipeline:
             if getattr(r, "record_type", "") == "test"
         ]
 
-        evaluations = [
-            self.judge_engine.judge_record(r)
-            for r in test_records
-        ]
+        evaluations: list[Evaluation] = []
+        priority_general_applied: list[dict] = []
+        for record in test_records:
+            priority_eval, priority_meta = _general_method_priority_evaluation(record)
+            if priority_eval is not None:
+                evaluations.append(priority_eval)
+                priority_general_applied.extend(priority_meta.get("applied", []))
+                continue
+            evaluations.append(self.judge_engine.judge_record(record))
+
+        general_method_meta = _apply_general_test_method_rules(evaluations)
+        if priority_general_applied:
+            general_method_meta["priority_applied_count"] = len(priority_general_applied)
+            general_method_meta["priority_applied"] = priority_general_applied
+            general_method_meta["applied_count"] = (
+                int(general_method_meta.get("applied_count", 0)) + len(priority_general_applied)
+            )
+            general_method_meta["applied"] = [
+                *priority_general_applied,
+                *(general_method_meta.get("applied") or []),
+            ]
 
         if static_result is not None:
             manufacturing_page_numbers = list(static_result.manufacturing_summary_page_numbers)
@@ -1858,6 +2490,12 @@ class DocumentJudgePipeline:
             start_order_idx=next_order_idx + len(structural_evaluations),
         )
         evaluations.extend(numeric_evaluations)
+        temporal_evaluations, temporal_meta = _build_temporal_sequence_evaluations(
+            records=records,
+            evaluations=evaluations,
+            start_order_idx=next_order_idx + len(structural_evaluations) + len(numeric_evaluations),
+        )
+        evaluations.extend(temporal_evaluations)
 
         tree = build_document_tree(records, evaluations)
 
@@ -1904,6 +2542,8 @@ class DocumentJudgePipeline:
                 "manufacturing_summary_meta": manufacturing_meta,
                 "structural_validation": structural_meta,
                 "numeric_precision_validation": numeric_meta,
+                "general_test_method_rules": general_method_meta,
+                "temporal_sequence_validation": temporal_meta,
             },
             manufacturing_summary_image_paths=manufacturing_image_paths,
             manufacturing_summary_status=manufacturing_status,

@@ -2212,6 +2212,15 @@ def render_final_judgement_page(
     if numeric_precision_html:
         combined_parts.append(numeric_precision_html)
 
+    temporal_sequence_html = _render_structural_validation_cards(
+        result,
+        record_type="temporal_sequence_validation",
+        section_title="공정 및 시간적 순서 확인 결과",
+        fallback_title="시간적 순서 검증",
+    )
+    if temporal_sequence_html:
+        combined_parts.append(temporal_sequence_html)
+
     combined_parts.append(
         """
         <hr style="border:none;border-top:1px solid #e5e7eb;margin:26px 0 18px 0;" />

@@ -28,13 +28,14 @@ STATIC_PDF_DIR = Path("static") / "pdf_view"
 SYNC_INTERVAL_SECONDS = int(os.getenv("SP_GMAIL_SYNC_SECONDS", "120"))
 DEFAULT_SUBJECT_KEYWORD = "[식약처]"
 ALL_PRODUCT_LABEL = "전체 제품"
+TARGET_REFERENCE_VERSION = "4.0"
 INBOX_DOCUMENT_LIST_HEIGHT = 610
 REFERENCE_DOCUMENT_LIST_HEIGHT = 455
 DEFAULT_GMAIL_SINCE = date(2026, 1, 1)
 GMAIL_CONFIRMATION_VERSION = "manual-gmail-confirm-20260602-v2"
 JUDGEMENT_STATUS_DIR = Path(__file__).resolve().parent / ".sp_judgement_status"
 JUDGEMENT_STATUS_INDEX = JUDGEMENT_STATUS_DIR / "status_index.json"
-APP_CACHE_VERSION = "sp-ui-cache-v87-20260729-domain-details"
+APP_CACHE_VERSION = "sp-ui-cache-v88-20260902-version-warning-only"
 JUDGEMENT_STATUS_CACHE_VERSION = "sp-app-direct-bridge-v53-20260729-domain-details"
 
 
@@ -1955,7 +1956,7 @@ def _extract_version(text: str, lower_name: str) -> str:
     if "녹십자" in lower_name and "알부민" in lower_name:
         return "v4.0"
     if "스카이코비원" in lower_name:
-        return "v8.0"
+        return "v4.0"
     if "일본뇌염" in lower_name:
         return "v3.9"
     if "제조요약도" in lower_name:
@@ -2166,33 +2167,33 @@ def _references_for_company_product(company: str, product: str) -> list[Referenc
     ]
 
 
+def _normalize_version_for_compare(version: str | None) -> str:
+    version = str(version or "").strip().lower()
+    version = re.sub(r"^(ver\.?|version|v)\s*", "", version)
+    return version.strip()
+
+
 def _version_gate(doc: InboxDocument | None, refs: list[ReferenceDocument]) -> dict:
     if doc is None:
         return {"ok": False, "reason": "제출 SP 문서를 먼저 선택하세요.", "matched": None}
     matching_refs = [ref for ref in refs if ref.company == doc.company and ref.product == doc.product]
-    if (
-        doc.company == "동국바이오사이언스"
-        and doc.product == "스카이코비원멀티주"
-        and matching_refs
-    ):
-        return {
-            "ok": True,
-            "reason": "스카이코비원멀티주는 제출 버전과 관계없이 기준 SP 버전이 일치하는 것으로 처리합니다.",
-            "matched": matching_refs[0],
-        }
     if not doc.version:
         return {
             "ok": False,
-            "reason": "제출 SP 문서에서 버전 정보를 확인하지 못해 검수를 진행할 수 없습니다.",
-            "matched": None,
+            "reason": f"제출 SP 문서에서 버전 정보를 확인하지 못했습니다. 기준 SP 버전 {TARGET_REFERENCE_VERSION} 기준으로 검수는 계속 진행합니다.",
+            "matched": matching_refs[0] if matching_refs else None,
         }
-    for ref in refs:
-        if ref.company == doc.company and ref.product == doc.product and ref.version == doc.version:
-            return {"ok": True, "reason": "제출 SP와 식약처 기준 SP 버전이 일치합니다.", "matched": ref}
+    doc_version = _normalize_version_for_compare(doc.version)
+    if doc_version == TARGET_REFERENCE_VERSION and matching_refs:
+        return {
+            "ok": True,
+            "reason": f"제출 SP 버전이 기준 SP 버전 {TARGET_REFERENCE_VERSION}과 일치합니다.",
+            "matched": matching_refs[0],
+        }
     return {
         "ok": False,
-        "reason": f"제출 SP 버전 {doc.version}와 일치하는 기준 SP가 없으므로 검수를 진행할 수 없습니다.",
-        "matched": None,
+        "reason": f"제출 SP 버전 {doc.version}와 기준 SP 버전 {TARGET_REFERENCE_VERSION}이 일치하지 않습니다. 버전 불일치로 표시하되 검수는 계속 진행합니다.",
+        "matched": matching_refs[0] if matching_refs else None,
     }
 
 
@@ -2203,9 +2204,9 @@ def _render_workflow_gate(
 ) -> None:
     selected_version = selected_doc.version if selected_doc else "-"
     matched_ref = gate.get("matched")
-    reference_version = matched_ref.version if matched_ref else (refs[0].version if refs else "-")
+    reference_version = TARGET_REFERENCE_VERSION
     gate_class = "ok" if gate.get("ok") else "blocked"
-    gate_label = "PASS" if gate.get("ok") else "HOLD"
+    gate_label = "PASS" if gate.get("ok") else "INFO"
 
     st.markdown(
         f"""
@@ -2221,7 +2222,7 @@ def _render_workflow_gate(
           <div class="workflow-node">
             <div class="node-icon">02</div>
             <div>
-              <b>기준 SP 버전 매칭</b>
+                <b>기준 SP 버전 확인</b>
               <span>제출 {selected_version} · 기준 {reference_version}</span>
             </div>
           </div>
@@ -2979,7 +2980,7 @@ def _render_reference_panel(
             _render_reference_card(ref, selected_doc, gate)
 
     st.markdown('<div class="action-bar">', unsafe_allow_html=True)
-    can_continue = bool(gate.get("ok")) and gate_context
+    can_continue = selected_doc is not None and gate_context
     if st.button("검수 진행", type="primary", use_container_width=True, disabled=not can_continue):
         if selected_doc is None:
             st.warning("검수할 제출 SP 문서를 먼저 선택해야 합니다.")
@@ -3107,17 +3108,12 @@ def _render_reference_card(ref: ReferenceDocument, selected_doc: InboxDocument |
     is_selected_product = selected_doc and ref.company == selected_doc.company and ref.product == selected_doc.product
     is_exact = bool(
         is_selected_product
-        and (
-            (
-                selected_doc.company == "동국바이오사이언스"
-                and selected_doc.product == "스카이코비원멀티주"
-            )
-            or selected_doc.version == ref.version
-        )
+        and _normalize_version_for_compare(selected_doc.version) == TARGET_REFERENCE_VERSION
     )
     card_class = "reference-card exact" if is_exact else "reference-card"
     status_class = "active" if ref.status == "적용중" else "archive"
     version_class = "version-match" if is_exact else "version-pill"
+    display_version = TARGET_REFERENCE_VERSION if is_selected_product else ref.version
 
     st.markdown(
         f"""
@@ -3130,7 +3126,7 @@ def _render_reference_card(ref: ReferenceDocument, selected_doc: InboxDocument |
                 <div class="ref-title">{_escape(ref.title)}</div>
               </div>
             </div>
-            <div class="{version_class}">{_escape(ref.version)}</div>
+            <div class="{version_class}">{_escape(display_version)}</div>
           </div>
           <div class="ref-grid">
             <span>제품명</span><b>{_escape(ref.product)}</b>

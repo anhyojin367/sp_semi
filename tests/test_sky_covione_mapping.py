@@ -59,15 +59,16 @@ def _reference(*, company="동국바이오사이언스", product="스카이코�
     )
 
 
-def test_sky_covione_version_gate_passes_with_different_versions_and_preserves_submission_version():
+def test_non_4_0_version_is_flagged_but_preserves_submission_and_reference():
     doc = _document(version="v1.2")
     ref = _reference(version="v8.0")
 
     result = _version_gate(doc, [ref])
 
-    assert result["ok"] is True
+    assert result["ok"] is False
     assert result["matched"] is ref
     assert doc.version == "v1.2"
+    assert "불일치" in result["reason"]
 
 
 def test_sky_covione_exception_does_not_cross_company_boundary():
@@ -78,9 +79,22 @@ def test_sky_covione_exception_does_not_cross_company_boundary():
     assert result["ok"] is False
 
 
-def test_other_products_keep_existing_version_comparison():
-    doc = _document(product="다른제품", version="v1.2")
+def test_other_products_also_use_temporary_4_0_baseline():
+    doc = _document(product="다른제품", version="v4.0")
     ref = _reference(product="다른제품", version="v8.0")
 
-    assert _version_gate(doc, [ref])["ok"] is False
-    assert _version_gate(doc, [_reference(product="다른제품", version="v1.2")])["ok"] is True
+    result = _version_gate(doc, [ref])
+
+    assert result["ok"] is True
+    assert result["matched"] is ref
+
+
+def test_missing_version_is_flagged_without_losing_matching_reference():
+    doc = _document(version="")
+    ref = _reference()
+
+    result = _version_gate(doc, [ref])
+
+    assert result["ok"] is False
+    assert result["matched"] is ref
+    assert "검수는 계속 진행" in result["reason"]

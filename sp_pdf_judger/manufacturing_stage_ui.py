@@ -835,9 +835,6 @@ def _build_stage_test_summary_map(result: ProcessingResult) -> dict[str, dict]:
             if lot_judgements:
                 for row in lot_judgements:
                     row_status_key = _evaluation_status_key(row)
-                    row_reason = clean_text(_get(row, "reason", "")) or clean_text(_get(row, "judgement_reason", ""))
-                    if not row_reason and status_key in {"failed", "passed"}:
-                        row_status_key = status_key
                     if not row_status_key:
                         row_status_key = status_key
                     out[stage_key][row_status_key] += 1

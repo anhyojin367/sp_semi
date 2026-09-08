@@ -76,6 +76,62 @@ def _result_for_stage(results: list, stage_name: str):
     return next(item for item in results if item.stage_name == stage_name)
 
 
+def _same_lot_source(*, mismatch: bool = False) -> dict:
+    second_date = "2026.02.11" if mismatch else "2026년 2월 10일"
+    second_expiry = "2029.02.10" if mismatch else "2028년 2월 10일"
+    return {
+        "records": [
+            {
+                "record_type": "info",
+                "section_number": "1.1",
+                "section_title": "신청제품정보",
+                "page_start": 2,
+                "content": (
+                    "제조번호 | LOT-2026-01\n"
+                    "제조년월일 | 2026.02.10\n"
+                    "사용(유효)기간 | 2028.02.10"
+                ),
+            },
+            {
+                "record_type": "info",
+                "section_number": "4.1",
+                "section_title": "완제의약품 제조정보",
+                "page_start": 12,
+                "content": (
+                    "제조번호 | LOT-2026-01\n"
+                    f"제조년월일 | {second_date}\n"
+                    f"유효기간 | {second_expiry}"
+                ),
+            },
+        ]
+    }
+
+
+def test_same_manufacturing_no_accepts_equivalent_date_formats() -> None:
+    result = _result_for_stage(
+        validate_manufacturing_info_consistency(_same_lot_source()),
+        "동일 제조번호 문서 전체 정합성",
+    )
+
+    assert result.status == "합격"
+    assert {field.field_name for field in result.fields} == {
+        "LOT-2026-01 제조년월일",
+        "LOT-2026-01 사용(유효)기간",
+    }
+    assert all(field.status == "합격" for field in result.fields)
+
+
+def test_same_manufacturing_no_rejects_date_and_expiry_mismatches() -> None:
+    result = _result_for_stage(
+        validate_manufacturing_info_consistency(_same_lot_source(mismatch=True)),
+        "동일 제조번호 문서 전체 정합성",
+    )
+
+    assert result.status == "불합격"
+    assert all(field.status == "불합격" for field in result.fields)
+    assert all("문서 위치별로 다릅니다" in field.reason for field in result.fields)
+
+
 def test_detects_manufacturing_mismatch_without_fixed_section_numbers() -> None:
     result = _result_for_stage(
         validate_manufacturing_info_consistency(_source(mismatch=True)),

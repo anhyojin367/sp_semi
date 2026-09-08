@@ -43,6 +43,8 @@ class FieldCompareResult:
     source_label: str = ""
     section_number: str = ""
     page_number: int | None = None
+    baseline_label: str = "제조요약도 기준"
+    comparison_label: str = "본문"
 
 
 @dataclass
@@ -50,6 +52,16 @@ class ManufacturingInfoOccurrence:
     stage_name: str
     item: ManufacturingInfoItem
     source_label: str
+    section_number: str = ""
+    page_number: int | None = None
+
+
+@dataclass
+class ManufacturingNoOccurrence:
+    manufacturing_no: str
+    manufacturing_date: str = ""
+    expiry_period: str = ""
+    source_label: str = ""
     section_number: str = ""
     page_number: int | None = None
 
@@ -79,6 +91,15 @@ FIELD_ALIASES = {
     "제조량": ["제조량"],
     "제조수량": ["제조수량", "총 제조수량", "총제조수량", "신청수량"],
 }
+
+EXPIRY_FIELD_ALIASES = [
+    "사용(유효)기간",
+    "사용 (유효) 기간",
+    "사용기간",
+    "유효기간",
+    "사용기한",
+    "유효기한",
+]
 
 
 def _get(obj: Any, key: str, default: Any = None) -> Any:
@@ -920,7 +941,10 @@ def _extract_value_after_label_from_lines(
                 return False
 
             # 날짜/수량/일반 라벨이 제조번호로 들어가는 것을 방지한다.
-            if _normalize_date_parts(candidate) != ("", "", ""):
+            if (
+                _normalize_date_parts(candidate) != ("", "", "")
+                and not re.search(r"[A-Za-z]", candidate)
+            ):
                 return False
 
             if _looks_like_quantity_only(candidate):
@@ -1015,7 +1039,10 @@ def _is_manufacturing_code_value(candidate: str) -> bool:
         return False
 
     # 날짜/수량/라벨/회사명류를 제조번호로 오인하지 않는다.
-    if _normalize_date_parts(candidate) != ("", "", ""):
+    if (
+        _normalize_date_parts(candidate) != ("", "", "")
+        and not re.search(r"[A-Za-z]", candidate)
+    ):
         return False
 
     if _looks_like_quantity_only(candidate):
@@ -1134,6 +1161,362 @@ def _extract_field_value_from_text(text: str, field_name: str) -> str:
         return ""
 
     return ""
+
+
+def _extract_expiry_value_from_text(text: str) -> str:
+    lines = _split_lines(text)
+    if not lines:
+        return ""
+
+    label_re = (
+        r"사용\s*\(\s*유효\s*\)\s*기간"
+        r"|사용\s*기간|유효\s*기간|사용\s*기한|유효\s*기한"
+    )
+    for idx, line in enumerate(lines):
+        match = re.search(
+            rf"(?:{label_re})\s*(?:\||:|：)?\s*([^|\n]+)$",
+            line,
+            flags=re.I,
+        )
+        if match:
+            value = _clean_table_extracted_value(match.group(1))
+            if value and not re.fullmatch(rf"(?:{label_re})", value, flags=re.I):
+                return value
+
+        if not re.search(rf"(?:{label_re})", line, flags=re.I):
+            continue
+        for candidate_idx in range(idx + 1, min(idx + 4, len(lines))):
+            candidate = _clean_table_extracted_value(lines[candidate_idx])
+            if not candidate:
+                continue
+            if re.search(
+                r"(제조번호|제조년월일|제조일자|제조량|제조수량|저장방법|보관조건)",
+                candidate,
+            ):
+                break
+            return candidate
+
+    return ""
+
+
+def _normalize_expiry_value(value: str | None) -> str:
+    value = clean_text(value)
+    if not value:
+        return ""
+
+    year, month, day = _normalize_date_parts(value)
+    if year and re.search(r"20\d{2}", value):
+        normalized_date = year
+        if month:
+            normalized_date += f"-{month}"
+        if day:
+            normalized_date += f"-{day}"
+        # 명시적인 만료일 표기는 구두점과 한글 날짜 표기 차이를 무시한다.
+        if not re.search(r"(개월|년\s*간|일부터|일로부터|제조일)", value):
+            return f"date:{normalized_date}"
+
+    normalized = value.casefold()
+    normalized = normalized.replace("제조년월일", "제조일")
+    normalized = normalized.replace("제조일자", "제조일")
+    normalized = normalized.replace("유효기한", "유효기간")
+    normalized = normalized.replace("사용기한", "사용기간")
+    normalized = re.sub(r"[\s\-_·.,:：/(){}\[\]<>~～]+", "", normalized)
+    return normalized
+
+
+def _normalize_date_value(value: str | None) -> str:
+    year, month, day = _normalize_date_parts(value)
+    if not year:
+        return ""
+    return "-".join(part for part in [year, month, day] if part)
+
+
+def _flatten_table_lines(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [clean_text(value)] if clean_text(value) else []
+    if isinstance(value, dict):
+        scalar_values = [
+            clean_text(item)
+            for item in value.values()
+            if not isinstance(item, (dict, list, tuple)) and clean_text(item)
+        ]
+        nested: list[str] = []
+        for item in value.values():
+            if isinstance(item, (dict, list, tuple)):
+                nested.extend(_flatten_table_lines(item))
+        return ([" | ".join(scalar_values)] if scalar_values else []) + nested
+    if isinstance(value, (list, tuple)):
+        lines: list[str] = []
+        for item in value:
+            if isinstance(item, (list, tuple)):
+                cells = [clean_text(cell) for cell in item]
+                if any(cells):
+                    lines.append(" | ".join(cells))
+            else:
+                lines.extend(_flatten_table_lines(item))
+        return lines
+    text = clean_text(value)
+    return [text] if text else []
+
+
+def _record_text_with_tables(record: Any) -> str:
+    parts = [_join_record_text(record)]
+    for key in ["result_table", "tables", "table_data"]:
+        parts.extend(_flatten_table_lines(_get(record, key, None)))
+    return "\n".join(part for part in parts if clean_text(part))
+
+
+def _header_index(cells: list[str], aliases: list[str]) -> int | None:
+    normalized_aliases = {_norm_match(alias) for alias in aliases}
+    for idx, cell in enumerate(cells):
+        cell_key = _norm_match(cell)
+        if any(alias and alias in cell_key for alias in normalized_aliases):
+            return idx
+    return None
+
+
+def _extract_table_manufacturing_no_occurrences(
+    record: Any,
+    text: str,
+) -> list[ManufacturingNoOccurrence]:
+    source_label = _record_source_label(record)
+    section_number = clean_text(_get(record, "section_number", ""))
+    page_number = _get(record, "page_start", None)
+    header_cells: list[str] = []
+    out: list[ManufacturingNoOccurrence] = []
+
+    for line in _split_lines(text):
+        if "|" not in line:
+            continue
+        cells = [_clean_table_extracted_value(cell) for cell in re.split(r"\s*\|\s*", line)]
+        code_idx = _header_index(cells, ["제조번호"])
+        if code_idx is not None:
+            header_cells = cells
+            continue
+        if not header_cells:
+            continue
+
+        code_idx = _header_index(header_cells, ["제조번호"])
+        date_idx = _header_index(header_cells, ["제조년월일", "제조일자", "제조일"])
+        expiry_idx = _header_index(header_cells, EXPIRY_FIELD_ALIASES)
+        if code_idx is None or code_idx >= len(cells):
+            continue
+        manufacturing_no = clean_text(cells[code_idx])
+        if not _is_manufacturing_code_value(manufacturing_no):
+            continue
+
+        out.append(
+            ManufacturingNoOccurrence(
+                manufacturing_no=manufacturing_no,
+                manufacturing_date=(
+                    clean_text(cells[date_idx])
+                    if date_idx is not None and date_idx < len(cells)
+                    else ""
+                ),
+                expiry_period=(
+                    clean_text(cells[expiry_idx])
+                    if expiry_idx is not None and expiry_idx < len(cells)
+                    else ""
+                ),
+                source_label=source_label,
+                section_number=section_number,
+                page_number=page_number,
+            )
+        )
+
+    return out
+
+
+def _extract_text_manufacturing_no_occurrences(
+    record: Any,
+    text: str,
+) -> list[ManufacturingNoOccurrence]:
+    table_items = _extract_table_manufacturing_no_occurrences(record, text)
+    if table_items:
+        return table_items
+
+    lines = _split_lines(text)
+    source_label = _record_source_label(record)
+    section_number = clean_text(_get(record, "section_number", ""))
+    page_number = _get(record, "page_start", None)
+    out: list[ManufacturingNoOccurrence] = []
+
+    code_line_indexes = [
+        idx
+        for idx, line in enumerate(lines)
+        if re.search(r"(?:제조번호|제\s*조\s*번호)", line)
+    ]
+    for idx in code_line_indexes:
+        window = "\n".join(lines[max(0, idx - 1) : min(len(lines), idx + 8)])
+        manufacturing_no = ""
+        direct_match = re.search(
+            r"(?:제조번호|제\s*조\s*번호)\s*(?:\||:|：)?\s*([A-Za-z0-9][A-Za-z0-9._/\-－–—]{1,40})",
+            lines[idx],
+            flags=re.I,
+        )
+        if direct_match:
+            candidate = clean_text(direct_match.group(1))
+            if _is_manufacturing_code_value(candidate):
+                manufacturing_no = candidate
+        if not manufacturing_no:
+            for candidate_idx in range(idx + 1, min(idx + 4, len(lines))):
+                candidate = _clean_table_extracted_value(lines[candidate_idx])
+                if _is_manufacturing_code_value(candidate):
+                    manufacturing_no = candidate
+                    break
+        if not _is_manufacturing_code_value(manufacturing_no):
+            continue
+        out.append(
+            ManufacturingNoOccurrence(
+                manufacturing_no=manufacturing_no,
+                manufacturing_date=_extract_field_value_from_text(window, "제조년월일"),
+                expiry_period=_extract_expiry_value_from_text(window),
+                source_label=source_label,
+                section_number=section_number,
+                page_number=page_number,
+            )
+        )
+
+    return out
+
+
+def collect_manufacturing_no_occurrences(records_source: Any) -> list[ManufacturingNoOccurrence]:
+    records = _records_from_source(records_source)
+    out: list[ManufacturingNoOccurrence] = []
+    seen: set[tuple[str, str, str, str, str, str]] = set()
+
+    def add(item: ManufacturingNoOccurrence) -> None:
+        code_key = _normalize_code(item.manufacturing_no)
+        if not code_key:
+            return
+        key = (
+            code_key,
+            "-".join(_normalize_date_parts(item.manufacturing_date)),
+            _normalize_expiry_value(item.expiry_period),
+            clean_text(item.source_label),
+            clean_text(item.section_number),
+            clean_text(str(item.page_number or "")),
+        )
+        if key in seen:
+            return
+        seen.add(key)
+        out.append(item)
+
+    for record in records:
+        record_type = clean_text(_get(record, "record_type", ""))
+        if record_type in {"flowchart", "diagram"}:
+            diagram_data = _get(record, "diagram_data", None) or {}
+            nodes = diagram_data.get("nodes") if isinstance(diagram_data, dict) else []
+            for node in nodes or []:
+                if not isinstance(node, dict):
+                    continue
+                fields = node.get("fields") or {}
+                if not isinstance(fields, dict):
+                    continue
+                manufacturing_no = _field_lookup(fields, FIELD_ALIASES["제조번호"])
+                if not _is_manufacturing_code_value(manufacturing_no):
+                    continue
+                stage_name = clean_text(node.get("name", "")) or "제조요약도"
+                add(
+                    ManufacturingNoOccurrence(
+                        manufacturing_no=manufacturing_no,
+                        manufacturing_date=_field_lookup(fields, FIELD_ALIASES["제조년월일"]),
+                        expiry_period=_field_lookup(fields, EXPIRY_FIELD_ALIASES),
+                        source_label=f"제조요약도 · {stage_name}",
+                        section_number=clean_text(_get(record, "section_number", "")),
+                        page_number=_get(record, "page_start", None),
+                    )
+                )
+            continue
+
+        text = _record_text_with_tables(record)
+        if not text:
+            continue
+        for item in _extract_text_manufacturing_no_occurrences(record, text):
+            add(item)
+
+    return out
+
+
+def _build_same_manufacturing_no_validation(
+    records_source: Any,
+) -> ManufacturingInfoValidationResult | None:
+    occurrences = collect_manufacturing_no_occurrences(records_source)
+    grouped: dict[str, list[ManufacturingNoOccurrence]] = {}
+    for occurrence in occurrences:
+        grouped.setdefault(_normalize_code(occurrence.manufacturing_no), []).append(occurrence)
+
+    field_results: list[FieldCompareResult] = []
+    compared_occurrences: set[tuple[str, str, int | None]] = set()
+    for code_key, code_occurrences in grouped.items():
+        if len(code_occurrences) < 2:
+            continue
+        display_code = clean_text(code_occurrences[0].manufacturing_no) or code_key
+        for field_name, value_attr, normalize in [
+            ("제조년월일", "manufacturing_date", _normalize_date_value),
+            ("사용(유효)기간", "expiry_period", _normalize_expiry_value),
+        ]:
+            entries: list[tuple[ManufacturingNoOccurrence, str, str]] = []
+            for occurrence in code_occurrences:
+                raw_value = clean_text(getattr(occurrence, value_attr, ""))
+                normalized_value = normalize(raw_value) if raw_value else ""
+                if raw_value and normalized_value:
+                    entries.append((occurrence, raw_value, normalized_value))
+            if len(entries) < 2:
+                continue
+
+            unique_values: dict[str, list[tuple[ManufacturingNoOccurrence, str]]] = {}
+            for occurrence, raw_value, normalized_value in entries:
+                unique_values.setdefault(normalized_value, []).append((occurrence, raw_value))
+                compared_occurrences.add(
+                    (occurrence.source_label, occurrence.section_number, occurrence.page_number)
+                )
+
+            baseline_occurrence, baseline_value, baseline_key = entries[0]
+            mismatch = len(unique_values) > 1
+            comparison_text = " / ".join(
+                f"{raw_value} ({occurrence.source_label})"
+                for occurrence, raw_value, _ in entries[1:]
+            ) or f"{baseline_value} ({baseline_occurrence.source_label})"
+            conflict_entry = next(
+                (
+                    (occurrence, raw_value)
+                    for occurrence, raw_value, normalized_value in entries[1:]
+                    if normalized_value != baseline_key
+                ),
+                (baseline_occurrence, baseline_value),
+            )
+            conflict_occurrence, _ = conflict_entry
+            field_results.append(
+                FieldCompareResult(
+                    field_name=f"{display_code} {field_name}",
+                    summary_value=f"{baseline_value} ({baseline_occurrence.source_label})",
+                    document_value=comparison_text,
+                    status="불합격" if mismatch else "합격",
+                    reason=(
+                        f"동일 제조번호 {display_code}에 연결된 {field_name} 값이 문서 위치별로 다릅니다."
+                        if mismatch
+                        else f"동일 제조번호 {display_code}에 연결된 {field_name} 값이 모든 확인 위치에서 일치합니다."
+                    ),
+                    source_label="문서 전체 동일 제조번호 비교",
+                    section_number=conflict_occurrence.section_number,
+                    page_number=conflict_occurrence.page_number,
+                    baseline_label="기준 위치",
+                    comparison_label="비교 위치",
+                )
+            )
+
+    if not field_results:
+        return None
+    status = "불합격" if any(field.status == "불합격" for field in field_results) else "합격"
+    return ManufacturingInfoValidationResult(
+        stage_name="동일 제조번호 문서 전체 정합성",
+        status=status,
+        fields=field_results,
+        source_count=len(compared_occurrences),
+    )
 
 
 
@@ -3683,6 +4066,10 @@ def validate_manufacturing_info_consistency(
             )
         )
 
+    same_no_result = _build_same_manufacturing_no_validation(records_source)
+    if same_no_result is not None:
+        results.append(same_no_result)
+
     return results
 
 
@@ -3768,8 +4155,8 @@ def render_manufacturing_info_validation_card(
                     <div class="mfg-issue-kind">{html.escape(issue_kind)}</div>
                     <div class="mfg-issue-source">{html.escape(source)}</div>
                     <div class="mfg-issue-values">
-                        <span>제조요약도 기준 <b>{html.escape(field.summary_value or '-')}</b></span>
-                        <span>본문 <b>{html.escape(field.document_value or '-')}</b></span>
+                        <span>{html.escape(field.baseline_label)} <b>{html.escape(field.summary_value or '-')}</b></span>
+                        <span>{html.escape(field.comparison_label)} <b>{html.escape(field.document_value or '-')}</b></span>
                     </div>
                     <div class="mfg-issue-reason">{html.escape(field.reason)}</div>
                 </div>
@@ -3786,8 +4173,8 @@ def render_manufacturing_info_validation_card(
                     <div class="mfg-issue-kind">{html.escape(field.field_name)} 정보 없음</div>
                     <div class="mfg-issue-source">{html.escape(source)}</div>
                     <div class="mfg-issue-values">
-                        <span>제조요약도 기준 <b>{html.escape(field.summary_value or '-')}</b></span>
-                        <span>본문 <b>{html.escape(field.document_value or '-')}</b></span>
+                        <span>{html.escape(field.baseline_label)} <b>{html.escape(field.summary_value or '-')}</b></span>
+                        <span>{html.escape(field.comparison_label)} <b>{html.escape(field.document_value or '-')}</b></span>
                     </div>
                     <div class="mfg-issue-reason">{html.escape(field.reason)}</div>
                 </div>
