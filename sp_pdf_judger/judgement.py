@@ -35,22 +35,26 @@ def _permit_has_fatal_extraction_error(errors: object) -> bool:
 
 
 def _authoritative_permit_evidence(permit_context: str) -> str:
-    """Keep only permit chunk evidence, excluding generated wrapper metadata."""
+    """Keep permit chunk evidence while preserving source content verbatim."""
     evidence: list[str] = []
+    in_source_content = False
     for raw_line in permit_context.splitlines():
         line = clean_text(raw_line)
+        if line.startswith("[허가서 근거 "):
+            in_source_content = False
+            continue
         if not line or line.startswith("[허가서 PDF 판정 후보 문단]"):
             continue
         if line.startswith("아래 내용은 허가서 PDF") or line.startswith("현재 SP 시험명과"):
             continue
-        if line.startswith("[허가서 근거 "):
+        if not in_source_content:
+            if line == "- 내용:":
+                in_source_content = True
+            elif line.startswith("- 섹션:") or line.startswith("- 경로:"):
+                evidence.append(line.split(":", 1)[1].strip())
+            # Generated file/page labels, and malformed content labels before
+            # the exact body marker, are metadata rather than evidence.
             continue
-        if line.startswith("- 파일:") or line.startswith("- 페이지:") or line.startswith("- 내용:"):
-            continue
-        if line.startswith("- 섹션:"):
-            line = line.split(":", 1)[1].strip()
-        elif line.startswith("- 경로:"):
-            line = line.split(":", 1)[1].strip()
         evidence.append(line)
     return "\n".join(evidence)
 
@@ -712,6 +716,39 @@ def _compact_semantic(text: str | None) -> str:
     text = text.replace("µ", "μ")
     text = re.sub(r"[\s\-_·.,:：/(){}\[\]]+", "", text)
     return text
+
+
+def _is_concrete_permit_basis(value: str | None) -> bool:
+    """Require a permit basis to carry a concrete condition, not grammar alone."""
+    raw = clean_text(value)
+    compact = _compact_semantic(raw)
+    if not compact or re.fullmatch(r"\d+(?:\.\d+)*", compact):
+        return False
+
+    if re.search(r"\d", compact):
+        numeric_signals = (
+            "%", "℃", "±", "eu", "day", "일", "개", "이상", "이하", "미만", "초과",
+            "최소", "최대", "atleast", "atmost", "minimum", "maximum",
+        )
+        return any(signal in compact for signal in numeric_signals)
+
+    subject = raw.casefold()
+    grammar_patterns = (
+        r"(?:이상|이하|미만|초과|최소|최대)\s*이어야\s*(?:한다)?",
+        r"(?:없어야|있어야|확인되어야|이어야)\s*(?:한다)?",
+        r"\b(?:minimum|maximum|day|days|at least|at most|must|should|be|criteria|requirement|test)\b",
+    )
+    for pattern in grammar_patterns:
+        subject = re.sub(pattern, " ", subject)
+
+    generic_words = (
+        "허가서", "permit", "pdf", "판정", "후보", "문단", "시험", "확인", "성상", "무균시험",
+        "기준", "조건", "이상", "이하", "미만", "초과", "최소", "최대", "일", "개",
+    )
+    for word in generic_words:
+        subject = subject.replace(word, " ")
+    subject_compact = _compact_semantic(subject)
+    return bool(subject_compact) and len(subject_compact) >= 2
 
 
 def _short_permit_basis(permit_context: str | None) -> str:
@@ -2818,12 +2855,6 @@ class JudgeEngine:
             "허가서", "permit", "pdf", "판정", "후보", "문단", "판정후보문단", "pdf판정후보문단",
             "허가서pdf판정후보문단", "시험", "확인시험", "성상", "무균시험", "기준", "조건", "확인",
         }
-        generic_basis_fragments = {
-            "허가서", "permit", "pdf", "판정", "후보", "문단", "판정후보문단", "pdf판정후보문단",
-            "허가서pdf판정후보문단", "이상", "이하", "미만", "초과", "최소", "최대", "일", "개",
-            "기준", "조건", "시험", "확인",
-        }
-
         def grounded(value: str, *, test_identity: bool = False) -> bool:
             raw_parts = re.split(r"\s*(?:>|/|\\|\||≫|→|,|;|:)\s*", value)
             parts: list[str] = []
@@ -2841,11 +2872,9 @@ class JudgeEngine:
                 distinctive = [part for part in parts if part not in generic_test_titles]
                 if not distinctive:
                     return False
-            elif len(parts) == 1 and parts[0] in generic_basis_fragments:
-                return False
             return all(part in context_compact for part in parts)
 
-        if not grounded(matched_test, test_identity=True) or not grounded(basis):
+        if not grounded(matched_test, test_identity=True) or not _is_concrete_permit_basis(basis) or not grounded(basis):
             return safe_hold
 
         failed = getattr(response, "failed_requirements", None) or []

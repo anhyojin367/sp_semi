@@ -397,6 +397,73 @@ def test_generated_wrapper_and_generic_basis_fragments_are_not_grounded(basis):
     assert evaluation.final_status == HOLD_LABEL
 
 
+@pytest.mark.parametrize(
+    "basis",
+    ["이상이어야", "이상이어야 한다", "최소이어야", "minimum", "days", "at least", "must be", "없어야 한다", "21"],
+)
+def test_vague_criterion_grammar_or_bare_number_is_not_concrete(basis):
+    text = f"3.2.1 유정란접종시험\n{basis}\n"
+    response = JudgeResponse(
+        status=PASS_LABEL,
+        reason="검수합격",
+        permit_match_status="matched",
+        matched_permit_test="유정란접종시험",
+        permit_basis=basis,
+    )
+    store = _store(text=text)
+    evaluation = JudgeEngine(EmptyRagStore(), FakePermitLLM(response), store, AUTHORITATIVE_POLICY).judge_record(_record())
+
+    assert evaluation.final_status == HOLD_LABEL
+
+
+@pytest.mark.parametrize(
+    ("basis", "text"),
+    [
+        ("80% 이상", "3.2.1 유정란접종시험\n80% 이상이어야 한다"),
+        ("최소 21일", "3.2.1 유정란접종시험\n최소 21일 배양해야 한다"),
+        ("36 ± 2 ℃", "3.2.1 유정란접종시험\n36 ± 2 ℃에서 배양해야 한다"),
+        ("혈구응집반응이 없어야 한다", "3.2.1 유정란접종시험\n혈구응집반응이 없어야 한다"),
+        ("발색된 점이 확인되어야 한다", "3.2.1 유정란접종시험\n발색된 점이 확인되어야 한다"),
+        ("음성이어야 한다", "3.2.1 유정란접종시험\n음성이어야 한다"),
+    ],
+)
+def test_concrete_numeric_and_textual_basis_remains_grounded(basis, text):
+    response = JudgeResponse(
+        status=PASS_LABEL,
+        reason="검수합격",
+        permit_match_status="matched",
+        matched_permit_test="유정란접종시험",
+        permit_basis=basis,
+    )
+    store = _store(text=text)
+    evaluation = JudgeEngine(EmptyRagStore(), FakePermitLLM(response), store, AUTHORITATIVE_POLICY).judge_record(_record())
+
+    assert evaluation.final_status == PASS_LABEL
+
+
+def test_authoritative_evidence_keeps_source_lines_that_look_like_metadata():
+    body = """3.2.1 유정란접종시험
+- 내용: 혈구응집반응이 없어야 한다
+- 파일: source-stated condition
+- 페이지: source-stated condition
+"""
+    response = JudgeResponse(
+        status=PASS_LABEL,
+        reason="검수합격",
+        permit_match_status="matched",
+        matched_permit_test="유정란접종시험",
+        permit_basis="혈구응집반응이 없어야 한다",
+    )
+    store = _store(text=body)
+    client = FakePermitLLM(response)
+    evaluation = JudgeEngine(EmptyRagStore(), client, store, AUTHORITATIVE_POLICY).judge_record(_record())
+
+    assert evaluation.final_status == PASS_LABEL
+    assert "- 내용: 혈구응집반응이 없어야 한다" in client.calls[0]["rag_contexts"][0]
+    assert "- 파일: source-stated condition" in client.calls[0]["rag_contexts"][0]
+    assert "- 페이지: source-stated condition" in client.calls[0]["rag_contexts"][0]
+
+
 def test_exact_generated_wrapper_cannot_ground_either_identity_or_basis():
     wrapper = "허가서 PDF 판정 후보 문단"
     response = JudgeResponse(
