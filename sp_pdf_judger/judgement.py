@@ -22,24 +22,37 @@ def _permit_has_fatal_extraction_error(errors: object) -> bool:
     """Classify content-completeness failures separately from operational warnings."""
     if not errors:
         return False
-    fatal_markers = (
-        "unreadable",
-        "could not extract",
-        "extraction",
-        "extraction failed",
-        "extract failed",
-        "failed to read",
-        "read failure",
-        "read pdf",
-        "render failed",
-        "render failure",
-        "could not render",
-        "pdf read",
+    fatal_patterns = (
+        r"^permit ocr page .+ is unreadable$",
+        r"^could not read permit pdf:",
+        r"^could not extract permit .+",
+        r"^could not render permit ocr pages:",
     )
     return any(
-        any(marker in clean_text(error).casefold() for marker in fatal_markers)
+        any(re.search(pattern, clean_text(error).casefold()) for pattern in fatal_patterns)
         for error in errors if clean_text(error)
     )
+
+
+def _authoritative_permit_evidence(permit_context: str) -> str:
+    """Keep only permit chunk evidence, excluding generated wrapper metadata."""
+    evidence: list[str] = []
+    for raw_line in permit_context.splitlines():
+        line = clean_text(raw_line)
+        if not line or line.startswith("[허가서 PDF 판정 후보 문단]"):
+            continue
+        if line.startswith("아래 내용은 허가서 PDF") or line.startswith("현재 SP 시험명과"):
+            continue
+        if line.startswith("[허가서 근거 "):
+            continue
+        if line.startswith("- 파일:") or line.startswith("- 페이지:") or line.startswith("- 내용:"):
+            continue
+        if line.startswith("- 섹션:"):
+            line = line.split(":", 1)[1].strip()
+        elif line.startswith("- 경로:"):
+            line = line.split(":", 1)[1].strip()
+        evidence.append(line)
+    return "\n".join(evidence)
 
 
 def _sanitize_user_reason(text: str | None) -> str:
@@ -2799,13 +2812,16 @@ class JudgeEngine:
 
         matched_test = clean_text(getattr(response, "matched_permit_test", None))
         basis = clean_text(getattr(response, "permit_basis", None))
-        context_compact = _compact_semantic(permit_context)
+        context_compact = _compact_semantic(_authoritative_permit_evidence(permit_context))
 
         generic_test_titles = {
-            "시험", "확인시험", "성상", "무균시험", "허가서", "permit", "pdf", "판정후보문단", "pdf판정후보문단",
+            "허가서", "permit", "pdf", "판정", "후보", "문단", "판정후보문단", "pdf판정후보문단",
+            "허가서pdf판정후보문단", "시험", "확인시험", "성상", "무균시험", "기준", "조건", "확인",
         }
         generic_basis_fragments = {
-            "이상", "이하", "미만", "초과", "최소", "최대", "일", "개", "기준", "조건", "허가서",
+            "허가서", "permit", "pdf", "판정", "후보", "문단", "판정후보문단", "pdf판정후보문단",
+            "허가서pdf판정후보문단", "이상", "이하", "미만", "초과", "최소", "최대", "일", "개",
+            "기준", "조건", "시험", "확인",
         }
 
         def grounded(value: str, *, test_identity: bool = False) -> bool:
@@ -2814,7 +2830,9 @@ class JudgeEngine:
             for raw_part in raw_parts:
                 part = re.sub(r"^\s*\d+(?:\.\d+)+\.?\s*", "", raw_part).strip()
                 compact = _compact_semantic(part)
-                if not compact or len(compact) < 2 or re.fullmatch(r"\d+(?:\.\d+)*", compact):
+                if not compact or re.fullmatch(r"\d+(?:\.\d+)*", compact):
+                    return False
+                if len(compact) < 4 and not re.search(r"\d", compact):
                     return False
                 parts.append(compact)
             if not parts:

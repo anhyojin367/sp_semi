@@ -120,8 +120,12 @@ def test_authoritative_call_has_full_record_and_full_complex_permit_context():
     yolk_sac = context[split:]
     for required in ["10~11일령", "최소 10개", "36 ± 2 ℃", "3일", "1차 생존율은 80%", "계대", "2차 생존율도 80%", "기니피그", "닭", "사람 O형", "혈구응집반응이 없어야"]:
         assert required in allantoic
+    assert allantoic.count("3일") >= 2
+    assert allantoic.count("80% 이상") >= 2
     for required in ["6~7일령", "최소 10개", "36 ± 2 ℃", "9일", "1차 생존율은 80%", "계대", "2차 생존율도 80%"]:
         assert required in yolk_sac
+    assert yolk_sac.count("9일") >= 2
+    assert yolk_sac.count("80% 이상") >= 2
     for required in ["10~11일령", "10개", "36 ± 2 ℃", "3일", "9일", "계대", "80%", "혈구응집반응이 없어야"]:
         assert required in context
     for required in ["Allantoic eggs", "최소 10개", "기니피그", "닭", "사람 O형", "Yolk-sac eggs", "6~7일령"]:
@@ -365,6 +369,48 @@ def test_wrapper_and_vague_permit_fragments_are_not_grounded(matched_test, basis
     assert evaluation.final_status == HOLD_LABEL
 
 
+@pytest.mark.parametrize("fragment", ["허가서 PDF 판정 후보 문단", "pdf", "permit", "시험", "확인"])
+def test_generated_wrapper_and_generic_identity_fragments_are_not_grounded(fragment):
+    response = JudgeResponse(
+        status=PASS_LABEL,
+        reason="검수합격",
+        permit_match_status="matched",
+        matched_permit_test=fragment,
+        permit_basis="혈구응집반응이 없어야",
+    )
+    evaluation = _engine(FakePermitLLM(response)).judge_record(_record())
+
+    assert evaluation.final_status == HOLD_LABEL
+
+
+@pytest.mark.parametrize("basis", ["허가서 PDF 판정 후보 문단", "이상", "최소"])
+def test_generated_wrapper_and_generic_basis_fragments_are_not_grounded(basis):
+    response = JudgeResponse(
+        status=PASS_LABEL,
+        reason="검수합격",
+        permit_match_status="matched",
+        matched_permit_test="유정란접종시험",
+        permit_basis=basis,
+    )
+    evaluation = _engine(FakePermitLLM(response)).judge_record(_record())
+
+    assert evaluation.final_status == HOLD_LABEL
+
+
+def test_exact_generated_wrapper_cannot_ground_either_identity_or_basis():
+    wrapper = "허가서 PDF 판정 후보 문단"
+    response = JudgeResponse(
+        status=PASS_LABEL,
+        reason="검수합격",
+        permit_match_status="matched",
+        matched_permit_test=wrapper,
+        permit_basis=wrapper,
+    )
+    evaluation = _engine(FakePermitLLM(response)).judge_record(_record())
+
+    assert evaluation.final_status == HOLD_LABEL
+
+
 def test_stage_qualified_generic_test_can_be_grounded_from_section_path():
     store = _store(
         text="""3.2 바이러스 시험
@@ -496,7 +542,7 @@ def test_authoritative_store_with_extraction_error_is_safe_hold():
     client = FakePermitLLM(None)
     store = _store()
     store.chunks = []
-    store.extraction_errors.append("unreadable permit")
+    store.extraction_errors.append("Permit OCR page 7 is unreadable")
     evaluation = JudgeEngine(EmptyRagStore(), client, store, AUTHORITATIVE_POLICY).judge_record(_record())
 
     assert evaluation.final_status == HOLD_LABEL
@@ -506,7 +552,7 @@ def test_authoritative_store_with_extraction_error_is_safe_hold():
 def test_authoritative_store_with_partial_extraction_error_is_safe_hold():
     client = FakePermitLLM(None)
     store = _store()
-    store.extraction_errors.append("unreadable page 2")
+    store.extraction_errors.append("Permit OCR page 2 is unreadable")
     evaluation = JudgeEngine(EmptyRagStore(), client, store, AUTHORITATIVE_POLICY).judge_record(_record())
 
     assert evaluation.final_status == HOLD_LABEL
@@ -531,6 +577,25 @@ def test_fatal_page_unreadable_error_is_hold_even_with_enabled_chunks():
     assert client.calls == []
 
 
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Permit OCR page 7 is unreadable",
+        "Could not read permit PDF: corrupted document",
+        "Could not extract permit document.pdf",
+        "Could not render permit OCR pages: renderer failed",
+    ],
+)
+def test_exact_fatal_content_error_is_hold_with_enabled_chunks(message):
+    client = FakePermitLLM(None)
+    store = _store()
+    store.extraction_errors.append(message)
+    evaluation = JudgeEngine(EmptyRagStore(), client, store, AUTHORITATIVE_POLICY).judge_record(_record())
+
+    assert evaluation.final_status == HOLD_LABEL
+    assert client.calls == []
+
+
 def test_non_content_cache_warning_allows_mapped_evaluation():
     client = FakePermitLLM(
         JudgeResponse(
@@ -543,6 +608,31 @@ def test_non_content_cache_warning_allows_mapped_evaluation():
     )
     store = _store()
     store.extraction_errors.append("Could not write permit OCR cache")
+    evaluation = JudgeEngine(EmptyRagStore(), client, store, AUTHORITATIVE_POLICY).judge_record(_record())
+
+    assert evaluation.final_status == PASS_LABEL
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Could not write permit OCR cache",
+        "Windows OCR failed for page 7; recovered usable text",
+        "Permit extraction warning: recovered usable text",
+    ],
+)
+def test_operational_warning_allows_mapped_evaluation_with_usable_chunks(message):
+    client = FakePermitLLM(
+        JudgeResponse(
+            status=PASS_LABEL,
+            reason="검수합격",
+            permit_match_status="matched",
+            matched_permit_test="유정란접종시험",
+            permit_basis="혈구응집반응이 없어야",
+        )
+    )
+    store = _store()
+    store.extraction_errors.append(message)
     evaluation = JudgeEngine(EmptyRagStore(), client, store, AUTHORITATIVE_POLICY).judge_record(_record())
 
     assert evaluation.final_status == PASS_LABEL
