@@ -18,6 +18,30 @@ FAIL_REASON_WORD = "검수불합격"
 HOLD_REASON_WORD = "검수보류"
 
 
+def _permit_has_fatal_extraction_error(errors: object) -> bool:
+    """Classify content-completeness failures separately from operational warnings."""
+    if not errors:
+        return False
+    fatal_markers = (
+        "unreadable",
+        "could not extract",
+        "extraction",
+        "extraction failed",
+        "extract failed",
+        "failed to read",
+        "read failure",
+        "read pdf",
+        "render failed",
+        "render failure",
+        "could not render",
+        "pdf read",
+    )
+    return any(
+        any(marker in clean_text(error).casefold() for marker in fatal_markers)
+        for error in errors if clean_text(error)
+    )
+
+
 def _sanitize_user_reason(text: str | None) -> str:
     text = clean_text(text)
     if not text:
@@ -2694,7 +2718,7 @@ class JudgeEngine:
         )
 
         store = self.permit_store
-        if store is not None and getattr(store, "extraction_errors", None):
+        if store is not None and _permit_has_fatal_extraction_error(getattr(store, "extraction_errors", None)):
             return safe_hold
 
         if not permit_context:
@@ -2766,7 +2790,7 @@ class JudgeEngine:
                 HOLD_LABEL,
                 "허가서 시험 매칭이 불명확하여 검수보류로 판단했습니다.",
                 "permit_pdf_llm_authoritative",
-                clean_text(getattr(response, "permit_basis", None)) or norm_criteria,
+                norm_criteria,
                 norm_result or clean_text(record.result),
                 "permit_pdf_llm_authoritative",
             )
@@ -2777,8 +2801,12 @@ class JudgeEngine:
         basis = clean_text(getattr(response, "permit_basis", None))
         context_compact = _compact_semantic(permit_context)
 
-        generic_test_titles = {"시험", "확인시험", "성상", "무균시험"}
-        generic_basis_fragments = {"기준", "허가서", "조건", "시험", "확인", "일"}
+        generic_test_titles = {
+            "시험", "확인시험", "성상", "무균시험", "허가서", "permit", "pdf", "판정후보문단", "pdf판정후보문단",
+        }
+        generic_basis_fragments = {
+            "이상", "이하", "미만", "초과", "최소", "최대", "일", "개", "기준", "조건", "허가서",
+        }
 
         def grounded(value: str, *, test_identity: bool = False) -> bool:
             raw_parts = re.split(r"\s*(?:>|/|\\|\||≫|→|,|;|:)\s*", value)

@@ -14,10 +14,12 @@ AUTHORITATIVE_POLICY = PermitPolicy("sky", True, True, True, "native")
 NON_AUTHORITATIVE_POLICY = PermitPolicy("other", False, False, False, "native")
 
 FULL_EGG_CHUNK = """3.2.1 유정란접종시험
+요막강 내 접종
 Allantoic eggs: 10~11일령 SPF 유정란 최소 10개에 시험검체를 접종한다.
 36 ± 2 ℃에서 3일 배양하고 1차 생존율은 80% 이상이어야 한다.
 계대 후 36 ± 2 ℃에서 3일 추가 배양하고 2차 생존율도 80% 이상이어야 한다.
 기니피그, 닭, 사람 O형 적혈구에 대한 혈구응집반응이 없어야 한다.
+난황낭 접종
 Yolk-sac eggs: 6~7일령 SPF 유정란 최소 10개를 36 ± 2 ℃에서 9일 배양한다.
 1차 생존율은 80% 이상이어야 하고 계대 후 9일 추가 배양하며 2차 생존율도 80% 이상이어야 한다.
 """
@@ -112,8 +114,10 @@ def test_authoritative_call_has_full_record_and_full_complex_permit_context():
     assert "SP 시험법" in call["record_context"]
     assert "원자료 비고" in call["record_context"]
     context = "\n".join(call["rag_contexts"])
-    allantoic = "\n".join(call["rag_contexts"][:1])
-    yolk_sac = "\n".join(call["rag_contexts"][:1])
+    start = context.index("요막강 내 접종")
+    split = context.index("난황낭 접종")
+    allantoic = context[start:split]
+    yolk_sac = context[split:]
     for required in ["10~11일령", "최소 10개", "36 ± 2 ℃", "3일", "1차 생존율은 80%", "계대", "2차 생존율도 80%", "기니피그", "닭", "사람 O형", "혈구응집반응이 없어야"]:
         assert required in allantoic
     for required in ["6~7일령", "최소 10개", "36 ± 2 ℃", "9일", "1차 생존율은 80%", "계대", "2차 생존율도 80%"]:
@@ -172,6 +176,25 @@ def test_ambiguous_yields_hold():
 
     assert evaluation.final_status == HOLD_LABEL
     assert evaluation.source == "permit_pdf_llm_authoritative"
+
+
+def test_ambiguous_diagnostic_fields_do_not_leak():
+    client = FakePermitLLM(
+        JudgeResponse(
+            status=PASS_LABEL,
+            reason="api/429 secret reason",
+            permit_match_status="ambiguous",
+            permit_basis="api/429 secret basis",
+            normalized_result="api/429 secret result",
+        )
+    )
+    evaluation = _engine(client).judge_record(_record())
+
+    assert evaluation.final_status == HOLD_LABEL
+    assert "api" not in (evaluation.reason or "").lower()
+    assert "429" not in (evaluation.reason or "")
+    assert "api" not in (evaluation.normalized_criteria or "").lower()
+    assert "api" not in (evaluation.normalized_result or "").lower()
 
 
 @pytest.mark.parametrize(
@@ -311,6 +334,31 @@ def test_generic_or_one_character_matched_test_is_not_grounded(matched_test):
         permit_match_status="matched",
         matched_permit_test=matched_test,
         permit_basis="혈구응집반응이 없어야",
+    )
+    evaluation = _engine(FakePermitLLM(response)).judge_record(_record())
+
+    assert evaluation.final_status == HOLD_LABEL
+
+
+@pytest.mark.parametrize(
+    ("matched_test", "basis"),
+    [
+        ("허가서", "혈구응집반응이 없어야"),
+        ("permit", "혈구응집반응이 없어야"),
+        ("pdf", "혈구응집반응이 없어야"),
+        ("PDF 판정 후보 문단", "혈구응집반응이 없어야"),
+        ("유정란접종시험", "이상"),
+        ("유정란접종시험", "최소"),
+        ("유정란접종시험", "기준"),
+    ],
+)
+def test_wrapper_and_vague_permit_fragments_are_not_grounded(matched_test, basis):
+    response = JudgeResponse(
+        status=PASS_LABEL,
+        reason="검수합격",
+        permit_match_status="matched",
+        matched_permit_test=matched_test,
+        permit_basis=basis,
     )
     evaluation = _engine(FakePermitLLM(response)).judge_record(_record())
 
@@ -463,6 +511,41 @@ def test_authoritative_store_with_partial_extraction_error_is_safe_hold():
 
     assert evaluation.final_status == HOLD_LABEL
     assert client.calls == []
+
+
+def test_fatal_page_unreadable_error_is_hold_even_with_enabled_chunks():
+    client = FakePermitLLM(
+        JudgeResponse(
+            status=PASS_LABEL,
+            reason="검수합격",
+            permit_match_status="matched",
+            matched_permit_test="유정란접종시험",
+            permit_basis="혈구응집반응이 없어야",
+        )
+    )
+    store = _store()
+    store.extraction_errors.append("Permit OCR page 7 is unreadable")
+    evaluation = JudgeEngine(EmptyRagStore(), client, store, AUTHORITATIVE_POLICY).judge_record(_record())
+
+    assert evaluation.final_status == HOLD_LABEL
+    assert client.calls == []
+
+
+def test_non_content_cache_warning_allows_mapped_evaluation():
+    client = FakePermitLLM(
+        JudgeResponse(
+            status=PASS_LABEL,
+            reason="검수합격",
+            permit_match_status="matched",
+            matched_permit_test="유정란접종시험",
+            permit_basis="혈구응집반응이 없어야",
+        )
+    )
+    store = _store()
+    store.extraction_errors.append("Could not write permit OCR cache")
+    evaluation = JudgeEngine(EmptyRagStore(), client, store, AUTHORITATIVE_POLICY).judge_record(_record())
+
+    assert evaluation.final_status == PASS_LABEL
 
 
 def test_criteria_only_record_enters_authoritative_hold_without_external_call():
