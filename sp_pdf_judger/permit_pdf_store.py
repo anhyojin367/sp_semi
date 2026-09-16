@@ -15,6 +15,7 @@ _HEADING_RE = re.compile(r"(?m)^\s*(?P<section>\d+(?:\.\d+)+(?:\.)?)\s+(?P<title
 _LEADING_SECTION_RE = re.compile(r"^\s*\d+(?:\.\d+)+(?:\.)?\s*")
 _NON_IDENTITY_RE = re.compile(r"[^0-9a-zA-Z가-힣]+")
 _GENERIC_TEST_NAMES = {"확인시험", "성상", "무균시험"}
+_GENERIC_STAGE_TOKENS = {"시험", "기준", "대한", "및", "test"}
 
 
 def normalize_permit_heading(text: str) -> str:
@@ -43,6 +44,35 @@ def _record_path_values(record: ExtractedRecord) -> list[str]:
                 if key in {"title", "section_title", "name", "label"} and value
             )
     return values
+
+
+def _stage_match_score(record_stage: str, chunk_stage: str) -> float:
+    """Score actual stage overlap, favoring a specific normalized path."""
+    record_identity = _compact_identity(record_stage, strip_number=True)
+    chunk_identity = _compact_identity(chunk_stage, strip_number=True)
+    if not record_identity or not chunk_identity:
+        return 0.0
+    if record_identity == chunk_identity:
+        return 100.0
+    if record_identity in chunk_identity:
+        return 80.0
+    if chunk_identity in record_identity:
+        return 20.0 + (30.0 * len(chunk_identity) / len(record_identity))
+
+    record_tokens = {
+        token
+        for token in re.findall(r"[a-z]+|[가-힣]+", record_stage.casefold())
+        if token not in _GENERIC_STAGE_TOKENS
+    }
+    chunk_tokens = {
+        token
+        for token in re.findall(r"[a-z]+|[가-힣]+", chunk_stage.casefold())
+        if token not in _GENERIC_STAGE_TOKENS
+    }
+    overlap = record_tokens & chunk_tokens
+    if not overlap:
+        return 0.0
+    return float(len(overlap) * 5)
 
 
 @dataclass(frozen=True)
@@ -80,7 +110,7 @@ class PermitPdfStore:
     @classmethod
     def from_page_texts(
         cls,
-        pages: Iterable[PermitPageText | tuple[int, str] | tuple[int, str, str]],
+        pages: Iterable[PermitPageText | tuple[int, str]],
         policy: PermitPolicy | None = None,
         source_file: str = "",
     ) -> "PermitPdfStore":
@@ -111,7 +141,7 @@ class PermitPdfStore:
 
     def _parse_page_texts(
         self,
-        pages: Iterable[PermitPageText | tuple[int, str] | tuple[int, str, str]],
+        pages: Iterable[PermitPageText | tuple[int, str]],
         source_file: str,
     ) -> list[PermitChunk]:
         chunks: list[PermitChunk] = []
@@ -161,9 +191,14 @@ class PermitPdfStore:
             }
 
         for raw_page in pages:
+            if self.policy is None and open_section is not None:
+                finish_open()
+                path_stack = []
             if isinstance(raw_page, PermitPageText):
                 page_number, page_text = raw_page.page_number, raw_page.text
             else:
+                if not isinstance(raw_page, tuple) or len(raw_page) != 2:
+                    raise ValueError("page texts must contain (page_number, text) tuples")
                 page_number, page_text = raw_page[0], raw_page[1]
             text = clean_text(page_text or "")
             if not text:
@@ -269,13 +304,9 @@ class PermitPdfStore:
             return 0.0
 
         stage_values = [record.section_title or "", *_record_path_values(record)]
-        stage_candidates = [_compact_identity(value, strip_number=True) for value in stage_values]
-        stage_candidates = [value for value in stage_candidates if len(value) >= 3]
-        stage_path = _compact_identity(chunk.normalized_stage_path, strip_number=True)
-        stage_score = max(
-            (80.0 for candidate in stage_candidates if candidate in stage_path or stage_path in candidate),
-            default=0.0,
-        )
+        record_stage_path = " ".join(value for value in stage_values if clean_text(value))
+        stage_path = chunk.normalized_stage_path
+        stage_score = _stage_match_score(record_stage_path, stage_path)
         if chunk_test in _GENERIC_TEST_NAMES and stage_score == 0:
             return 0.0
         return test_score + stage_score
@@ -283,7 +314,9 @@ class PermitPdfStore:
     def format_context(self, chunks: list[PermitChunk]) -> str:
         parts: list[str] = []
         for index, chunk in enumerate(chunks, start=1):
-            page_range = str(chunk.page_start) if chunk.page_start == chunk.page_end else f"{chunk.page_start}-{chunk.page_end}"
+            page_start = chunk.page_start if chunk.page_start is not None else chunk.page_number
+            page_end = chunk.page_end if chunk.page_end is not None else chunk.page_number
+            page_range = str(page_start) if page_start == page_end else f"{page_start}-{page_end}"
             parts.append(
                 f"[허가서 근거 {index}]\n- 파일: {chunk.source_file}\n- 페이지: {page_range}\n"
                 f"- 섹션: {chunk.section_number} {chunk.title}\n- 내용:\n{chunk.text}"
