@@ -26,6 +26,10 @@ class JudgeResponse(BaseModel):
     reason: str = Field(description="검수합격, 검수불합격, 또는 검수보류라는 표현을 포함한 한글 1문장")
     normalized_criteria: str | None = None
     normalized_result: str | None = None
+    permit_match_status: str | None = None
+    matched_permit_test: str | None = None
+    permit_basis: str | None = None
+    failed_requirements: list[str] | None = None
 
 
 class ClovaJudgeClient:
@@ -74,6 +78,8 @@ class ClovaJudgeClient:
         rag_contexts: list[str],
         forced_status: str | None = None,
         deterministic_reason: str | None = None,
+        authoritative_permit: bool = False,
+        record_context: str | None = None,
     ) -> JudgeResponse | None:
         if not self.enabled or self.client is None:
             return None
@@ -93,9 +99,26 @@ class ClovaJudgeClient:
                 f"'{HOLD_LABEL}'는 시험기준/시험결과가 비어 있거나, OCR이 심하게 깨졌거나, 외부 문서 없이는 기준 자체를 알 수 없는 경우에만 선택하라."
             )
 
+        authoritative_instructions = ""
+        if authoritative_permit:
+            authoritative_instructions = """
+권위 있는 허가서 판정 단계:
+- 반드시 permit_match_status를 정확히 matched, ambiguous, not_found 중 하나로 출력하라.
+- 허가서 섹션 번호나 번호가 비슷하다는 이유로 시험을 매칭하지 말고, 시험명과 모든 조건의 의미를 확인하라.
+- 허가서의 모든 조건을 하나씩 확인하라. 일부 조건만 보고 matched 판정을 내리지 말라.
+- 허가서 기준은 현재 SP 판정 기준보다 우선하는 권위 있는 기준이다. SP 기준과 충돌하면 허가서 판정을 적용하라.
+- matched일 때만 허가서 기준에 따른 status를 검수합격 또는 검수불합격으로 출력하라.
+- ambiguous 또는 not_found일 때는 각각 그 값을 유지하고, 근거 없이 허가서 판정을 만들지 말라.
+- matched_permit_test에는 의미적으로 매칭한 허가서 시험명을, permit_basis에는 실제 핵심 허가서 기준을, failed_requirements에는 위반한 각 조건을 적어라.
+""".strip()
+
+        record_context_text = clean_text(record_context) or "- 전체 SP 레코드 없음"
+
         prompt = f"""
 당신은 백신/바이오의약품 시험성적서 판정 보조 모델이다.
 {task}
+
+{authoritative_instructions}
 
 판정 원칙:
 - 아래의 전체 디테일, 회사 디테일, 제품 디테일이 제공되면 세 계층을 모두 확인한다.
@@ -138,6 +161,9 @@ class ClovaJudgeClient:
 시험명: {clean_text(test_name)}
 시험기준: {clean_text(criteria)}
 시험결과: {clean_text(result)}
+
+전체 SP 레코드 문맥:
+{record_context_text}
 
 결정적 판정 근거 / 단계 지시:
 {clean_text(deterministic_reason)}

@@ -6,6 +6,7 @@ from .config import FAIL_LABEL, HOLD_LABEL, PASS_LABEL
 from .criteria_parser import parse_criteria_text
 from .llm import ClovaJudgeClient
 from .permit_pdf_store import PermitPdfStore
+from .permit_catalog import PermitPolicy
 from .rag import UcumRagStore
 from .schemas import Evaluation, ExtractedRecord
 from .unit_normalizer import ParsedMeasurement, parse_number_and_unit
@@ -2391,12 +2392,26 @@ class JudgeEngine:
         rag_store: UcumRagStore,
         llm_client: ClovaJudgeClient | None = None,
         permit_store: PermitPdfStore | None = None,
+        permit_policy: PermitPolicy | None = None,
     ) -> None:
         self.rag_store = rag_store
         self.llm_client = llm_client
         self.permit_store = permit_store
+        self.permit_policy = permit_policy or getattr(permit_store, "policy", None)
+
+    @staticmethod
+    def _record_context(record: ExtractedRecord) -> str:
+        """Serialize the complete SP record for an authoritative permit call."""
+        parts: list[str] = []
+        for name, value in vars(record).items():
+            if value is None or value == "" or value == [] or value == {}:
+                continue
+            parts.append(f"{name}: {value}")
+        return "\n".join(parts)
 
     def _search_rag_contexts(self, query: str, top_k: int = 9) -> list[str]:
+        if self.rag_store is None:
+            return []
         docs = self.rag_store.search(query, top_k=max(top_k * 2, top_k))
         if not docs:
             return []
@@ -2634,6 +2649,128 @@ class JudgeEngine:
             "gemini_second",
         )
 
+    def _judge_with_authoritative_permit(
+        self,
+        *,
+        record: ExtractedRecord,
+        title: str,
+        permit_context: str,
+        first_status: str | None,
+        first_reason: str | None,
+        norm_criteria: str | None,
+        norm_result: str | None,
+    ) -> tuple[str | None, str | None, str | None, str | None, str | None, str | None]:
+        """Apply the structured permit verdict, safely and only when mapped."""
+        safe_hold = (
+            HOLD_LABEL,
+            "허가서 기준의 시험 매칭 또는 모든 조건을 확정할 수 없어 검수보류로 판단했습니다.",
+            "permit_pdf_llm_authoritative",
+            norm_criteria,
+            norm_result or clean_text(record.result),
+            "permit_pdf_llm_authoritative",
+        )
+
+        if not permit_context:
+            return safe_hold
+
+        client = self.llm_client
+        if client is None or getattr(client, "enabled", True) is False:
+            return safe_hold
+
+        query = " ".join(
+            filter(
+                None,
+                [
+                    record.test_name,
+                    record.section_title,
+                    record.criteria,
+                    record.result,
+                    record.method,
+                    record.raw_text,
+                    permit_context,
+                ],
+            )
+        )
+        rag_contexts = [permit_context, *self._search_rag_contexts(query, top_k=8)]
+        deterministic_reason = "\n".join(
+            [
+                "권위 있는 허가서 기준 판정 단계입니다.",
+                f"앞선 SP 판정: {first_status or '미확정'}",
+                f"앞선 SP 판정 이유: {first_reason or ''}",
+                "허가서 시험명과 현재 SP 시험을 의미적으로 매칭하고, 허가서의 모든 조건을 하나씩 확인하세요.",
+                "허가서 섹션 번호는 매칭 근거로 사용하지 마세요.",
+                "허가서 기준은 SP 기준보다 우선합니다.",
+                "permit_match_status는 matched, ambiguous, not_found 중 하나여야 합니다.",
+            ]
+        )
+        llm_criteria = "\n".join(
+            [
+                "[SP 문서의 시험기준]",
+                clean_text(record.criteria),
+                "",
+                "[허가서 전체 검색 근거]",
+                permit_context,
+            ]
+        )
+
+        try:
+            response = client.explain(
+                test_name=title,
+                criteria=llm_criteria,
+                result=record.result,
+                rag_contexts=rag_contexts,
+                forced_status=None,
+                deterministic_reason=deterministic_reason,
+                authoritative_permit=True,
+                record_context=self._record_context(record),
+            )
+        except Exception:
+            return safe_hold
+
+        if response is None or not getattr(response, "status", None):
+            return safe_hold
+
+        match_status = clean_text(getattr(response, "permit_match_status", None)).casefold()
+        if match_status == "not_found":
+            # No mapped permit requirement: the primary SP verdict remains authoritative.
+            return None, None, None, None, None, None
+        if match_status == "ambiguous":
+            return (
+                HOLD_LABEL,
+                "허가서 시험 매칭이 불명확하여 검수보류로 판단했습니다.",
+                "permit_pdf_llm_authoritative",
+                clean_text(getattr(response, "permit_basis", None)) or norm_criteria,
+                clean_text(getattr(response, "normalized_result", None)) or norm_result or clean_text(record.result),
+                "permit_pdf_llm_authoritative",
+            )
+        if match_status != "matched" or response.status not in {PASS_LABEL, FAIL_LABEL}:
+            return safe_hold
+
+        llm_reason = _sanitize_user_reason(getattr(response, "reason", None))
+        llm_norm_criteria = clean_text(getattr(response, "normalized_criteria", None)) or norm_criteria
+        llm_norm_result = clean_text(getattr(response, "normalized_result", None)) or norm_result or clean_text(record.result)
+        if response.status == FAIL_LABEL:
+            basis = clean_text(getattr(response, "permit_basis", None))
+            failed = getattr(response, "failed_requirements", None) or []
+            failed_text = " / ".join(clean_text(item) for item in failed if clean_text(item))
+            basis = basis or failed_text or "허가서 요구조건"
+            conflict = failed_text or llm_norm_result or clean_text(record.result)
+            reason = (
+                f"허가서 기준 '{basis}'을 충족하지 못했고, SP 시험결과 '{conflict}'와 충돌하여 "
+                f"{FAIL_REASON_WORD}으로 판단했습니다."
+            )
+        else:
+            reason = llm_reason or f"허가서의 모든 조건을 만족하여 {PASS_REASON_WORD}으로 판단했습니다."
+
+        return (
+            response.status,
+            reason,
+            "permit_pdf_llm_authoritative",
+            llm_norm_criteria or clean_text(getattr(response, "permit_basis", None)) or norm_criteria,
+            llm_norm_result,
+            "permit_pdf_llm_authoritative",
+        )
+
     def _judge_with_permit_second_phase(
         self,
         *,
@@ -2656,6 +2793,17 @@ class JudgeEngine:
         - LLM이 허가서 후보 문단이 현재 시험과 관련 없다고 판단하거나 애매하면 검수보류를 유지한다.
         - LLM이 사용 불가능한 경우에만, exact anchor가 있는 문단에 한해 기존 규칙 판정을 제한적으로 사용한다.
         """
+        if self.permit_policy is not None and self.permit_policy.authoritative:
+            return self._judge_with_authoritative_permit(
+                record=record,
+                title=title,
+                permit_context=permit_context,
+                first_status=first_status,
+                first_reason=first_reason,
+                norm_criteria=norm_criteria,
+                norm_result=norm_result,
+            )
+
         if not permit_context:
             return None, None, None, None, None, None
 
@@ -2856,9 +3004,10 @@ class JudgeEngine:
             reason = "시험기준과 시험결과가 존재하지만 문서 기준과 참고 근거만으로 확정하기 어려워 검수보류로 판단했습니다."
             source = "manual_hold_before"
 
-        # 허가서 판정은 앞선 판정이 확정하지 못한 보류 항목에만 적용한다.
-        # 규칙/추가 판정이 명확히 합격 또는 불합격으로 확정한 항목은 허가서의 다른 기준으로 뒤집지 않는다.
-        if allow_permit and status == HOLD_LABEL:
+        # 권위 있는 허가서는 앞선 판정이 PASS/FAIL이어도 모든 항목을 재평가한다.
+        # 비권위 허가서는 기존 호환 동작대로 HOLD 항목에만 적용한다.
+        permit_is_authoritative = bool(self.permit_policy is not None and self.permit_policy.authoritative)
+        if allow_permit and (permit_is_authoritative or status == HOLD_LABEL):
             permit_context = self._get_permit_context(record)
             permit_status, permit_reason, permit_comparator, permit_norm_criteria, permit_norm_result, permit_source = self._judge_with_permit_second_phase(
                 record=record,
