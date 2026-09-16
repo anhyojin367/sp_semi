@@ -7,7 +7,6 @@ from sp_pdf_judger.judgement import JudgeEngine
 from sp_pdf_judger.llm import ClovaJudgeClient, JudgeResponse
 from sp_pdf_judger.permit_catalog import PermitPolicy
 from sp_pdf_judger.permit_pdf_store import PermitPdfStore
-from sp_pdf_judger.rag import UcumRagStore
 from sp_pdf_judger.schemas import ExtractedRecord
 
 
@@ -38,6 +37,11 @@ class FakePermitLLM:
         return self.response
 
 
+class EmptyRagStore:
+    def search(self, query: str, top_k: int = 9):
+        return []
+
+
 def _store(policy: PermitPolicy = AUTHORITATIVE_POLICY, text: str = FULL_EGG_CHUNK):
     return PermitPdfStore.from_page_texts([(1, text)], policy=policy, source_file="permit.pdf")
 
@@ -59,7 +63,7 @@ def _record(*, test_name: str = "유정란접종시험", criteria: str = "생존
 
 def _engine(client, policy=AUTHORITATIVE_POLICY):
     return JudgeEngine(
-        UcumRagStore(),
+        EmptyRagStore(),
         llm_client=client,
         permit_store=_store(policy),
         permit_policy=policy,
@@ -108,6 +112,12 @@ def test_authoritative_call_has_full_record_and_full_complex_permit_context():
     assert "SP 시험법" in call["record_context"]
     assert "원자료 비고" in call["record_context"]
     context = "\n".join(call["rag_contexts"])
+    allantoic = "\n".join(call["rag_contexts"][:1])
+    yolk_sac = "\n".join(call["rag_contexts"][:1])
+    for required in ["10~11일령", "최소 10개", "36 ± 2 ℃", "3일", "1차 생존율은 80%", "계대", "2차 생존율도 80%", "기니피그", "닭", "사람 O형", "혈구응집반응이 없어야"]:
+        assert required in allantoic
+    for required in ["6~7일령", "최소 10개", "36 ± 2 ℃", "9일", "1차 생존율은 80%", "계대", "2차 생존율도 80%"]:
+        assert required in yolk_sac
     for required in ["10~11일령", "10개", "36 ± 2 ℃", "3일", "9일", "계대", "80%", "혈구응집반응이 없어야"]:
         assert required in context
     for required in ["Allantoic eggs", "최소 10개", "기니피그", "닭", "사람 O형", "Yolk-sac eggs", "6~7일령"]:
@@ -133,7 +143,7 @@ def test_short_cho_master_cell_result_is_mapped_permit_fail():
     store = _store(text="""3.2.2 돼지유래바이러스부정시험
 CHO 마스터 세포주를 최소 21일 배양해야 한다.
 """)
-    engine = JudgeEngine(UcumRagStore(), client, store, AUTHORITATIVE_POLICY)
+    engine = JudgeEngine(EmptyRagStore(), client, store, AUTHORITATIVE_POLICY)
 
     evaluation = engine.judge_record(record)
 
@@ -266,11 +276,13 @@ def test_determined_loq_table_pass_is_overridden_once_without_losing_rows():
     store = _store(text="""3.2.2 잔류 숙주세포 DNA 시험
 유전자 중 1종 이상이 정량한계 미만이어야 함.
 """)
-    evaluation = JudgeEngine(UcumRagStore(), client, store, AUTHORITATIVE_POLICY).judge_record(record)
+    evaluation = JudgeEngine(EmptyRagStore(), client, store, AUTHORITATIVE_POLICY).judge_record(record)
 
     assert evaluation.final_status == FAIL_LABEL
     assert len(evaluation.lot_judgements) == 3
-    assert all(row["status"] == PASS_LABEL for row in evaluation.lot_judgements)
+    assert all(row["status"] == FAIL_LABEL for row in evaluation.lot_judgements)
+    assert all(row["source"] == "permit_pdf_llm_authoritative" for row in evaluation.lot_judgements)
+    assert [row["item_value"] for row in evaluation.lot_judgements] == ["A 유전자", "B 유전자", "C 유전자"]
     assert len(client.calls) == 1
 
 
@@ -289,6 +301,40 @@ def test_matched_requires_grounded_test_name_and_concrete_basis(response):
 
     assert evaluation.final_status == HOLD_LABEL
     assert evaluation.source == "permit_pdf_llm_authoritative"
+
+
+@pytest.mark.parametrize("matched_test", ["시험", "확인시험", "성상", "무균시험", "일", "3.2.1"])
+def test_generic_or_one_character_matched_test_is_not_grounded(matched_test):
+    response = JudgeResponse(
+        status=PASS_LABEL,
+        reason="검수합격",
+        permit_match_status="matched",
+        matched_permit_test=matched_test,
+        permit_basis="혈구응집반응이 없어야",
+    )
+    evaluation = _engine(FakePermitLLM(response)).judge_record(_record())
+
+    assert evaluation.final_status == HOLD_LABEL
+
+
+def test_stage_qualified_generic_test_can_be_grounded_from_section_path():
+    store = _store(
+        text="""3.2 바이러스 시험
+3.2.1 확인시험
+80% 이상이어야 함.
+"""
+    )
+    response = JudgeResponse(
+        status=PASS_LABEL,
+        reason="검수합격",
+        permit_match_status="matched",
+        matched_permit_test="바이러스 > 확인시험",
+        permit_basis="80% 이상",
+    )
+    record = _record(test_name="확인시험", result="80% 이상", criteria="80% 이상")
+    evaluation = JudgeEngine(EmptyRagStore(), FakePermitLLM(response), store, AUTHORITATIVE_POLICY).judge_record(record)
+
+    assert evaluation.final_status == PASS_LABEL
 
 
 def test_invalid_status_is_hold_before_not_found_fallback():
@@ -313,6 +359,28 @@ def test_provider_diagnostic_in_structured_permit_fields_is_rejected_without_lea
     assert evaluation.final_status == HOLD_LABEL
     assert "api" not in (evaluation.reason or "").lower()
     assert "429" not in (evaluation.reason or "")
+
+
+@pytest.mark.parametrize("status", [PASS_LABEL, FAIL_LABEL])
+def test_authoritative_pass_fail_reason_and_normalized_result_ignore_model_diagnostics(status):
+    response = JudgeResponse(
+        status=status,
+        reason="api/429 secret provider detail",
+        permit_match_status="matched",
+        matched_permit_test="유정란접종시험",
+        permit_basis="혈구응집반응이 없어야",
+        failed_requirements=["혈구응집반응이 없어야"],
+        normalized_result="api/429 secret normalized result",
+    )
+    evaluation = _engine(FakePermitLLM(response)).judge_record(
+        _record(result="생존율 90%, 혈구응집반응 확인")
+    )
+
+    assert evaluation.final_status == status
+    assert "api" not in (evaluation.reason or "").lower()
+    assert "429" not in (evaluation.reason or "")
+    assert "api" not in (evaluation.normalized_result or "").lower()
+    assert "429" not in (evaluation.normalized_result or "")
 
 
 def test_fail_reason_uses_actual_sp_result_not_failed_requirement():
@@ -359,7 +427,7 @@ def test_authoritative_context_keeps_long_chunk_and_all_retrieved_chunks():
         )
     )
     store = _store(text=long_text + "\n" + second)
-    evaluation = JudgeEngine(UcumRagStore(), client, store, AUTHORITATIVE_POLICY).judge_record(_record())
+    evaluation = JudgeEngine(EmptyRagStore(), client, store, AUTHORITATIVE_POLICY).judge_record(_record())
 
     assert evaluation.final_status == PASS_LABEL
     context = "\n".join(client.calls[0]["rag_contexts"])
@@ -370,7 +438,7 @@ def test_authoritative_context_keeps_long_chunk_and_all_retrieved_chunks():
 def test_valid_store_without_search_candidate_preserves_primary_without_llm_call():
     client = FakePermitLLM(None)
     store = _store(text="3.2.1 전혀 다른 허가시험\n다른 기준")
-    evaluation = JudgeEngine(UcumRagStore(), client, store, AUTHORITATIVE_POLICY).judge_record(_record())
+    evaluation = JudgeEngine(EmptyRagStore(), client, store, AUTHORITATIVE_POLICY).judge_record(_record())
 
     assert evaluation.final_status == PASS_LABEL
     assert client.calls == []
@@ -381,7 +449,55 @@ def test_authoritative_store_with_extraction_error_is_safe_hold():
     store = _store()
     store.chunks = []
     store.extraction_errors.append("unreadable permit")
-    evaluation = JudgeEngine(UcumRagStore(), client, store, AUTHORITATIVE_POLICY).judge_record(_record())
+    evaluation = JudgeEngine(EmptyRagStore(), client, store, AUTHORITATIVE_POLICY).judge_record(_record())
 
     assert evaluation.final_status == HOLD_LABEL
     assert client.calls == []
+
+
+def test_authoritative_store_with_partial_extraction_error_is_safe_hold():
+    client = FakePermitLLM(None)
+    store = _store()
+    store.extraction_errors.append("unreadable page 2")
+    evaluation = JudgeEngine(EmptyRagStore(), client, store, AUTHORITATIVE_POLICY).judge_record(_record())
+
+    assert evaluation.final_status == HOLD_LABEL
+    assert client.calls == []
+
+
+def test_criteria_only_record_enters_authoritative_hold_without_external_call():
+    client = FakePermitLLM(None)
+    evaluation = _engine(client).judge_record(_record(result=None))
+
+    assert evaluation.final_status == HOLD_LABEL
+    assert evaluation.source == "permit_pdf_llm_authoritative"
+    assert client.calls == []
+
+
+def test_authoritative_prompt_has_full_context_once_and_criteria_only_sp_text(monkeypatch):
+    client = FakePermitLLM(
+        JudgeResponse(
+            status=PASS_LABEL,
+            reason="검수합격",
+            permit_match_status="matched",
+            matched_permit_test="유정란접종시험",
+            permit_basis="혈구응집반응이 없어야",
+        )
+    )
+    unique_tail = "UNIQUE_PERMIT_SENTINEL_9f7c"
+    store = _store(text=FULL_EGG_CHUNK + "\n" + unique_tail)
+    evaluation = JudgeEngine(EmptyRagStore(), client, store, AUTHORITATIVE_POLICY).judge_record(_record())
+
+    assert evaluation.final_status == PASS_LABEL
+    call = client.calls[0]
+    rendered = "\n".join(
+        [
+            call["criteria"],
+            call["result"] or "",
+            call["record_context"],
+            *call["rag_contexts"],
+            call["deterministic_reason"],
+        ]
+    )
+    assert rendered.count(unique_tail) == 1
+    assert "[허가서 전체 검색 근거]" not in call["criteria"]

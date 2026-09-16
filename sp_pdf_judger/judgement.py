@@ -2463,7 +2463,18 @@ class JudgeEngine:
         if self.permit_policy is not None and self.permit_policy.authoritative:
             # Authoritative judging must see every retrieved chunk in full.  The
             # legacy candidate clipping below remains unchanged for other policies.
-            context = self.permit_store.format_context(chunks).strip()
+            context_parts: list[str] = []
+            for index, chunk in enumerate(chunks, start=1):
+                page_start = chunk.page_start if chunk.page_start is not None else chunk.page_number
+                page_end = chunk.page_end if chunk.page_end is not None else chunk.page_number
+                page_range = str(page_start) if page_start == page_end else f"{page_start}-{page_end}"
+                path = " > ".join(clean_text(value) for value in chunk.section_path_titles if clean_text(value))
+                path_line = f"\n- 경로: {path}" if path else ""
+                context_parts.append(
+                    f"[허가서 근거 {index}]\n- 파일: {chunk.source_file}\n- 페이지: {page_range}\n"
+                    f"- 섹션: {chunk.section_number} {chunk.title}{path_line}\n- 내용:\n{chunk.text}"
+                )
+            context = "\n\n".join(context_parts).strip()
             if not context:
                 return ""
             return (
@@ -2682,8 +2693,11 @@ class JudgeEngine:
             "permit_pdf_llm_authoritative",
         )
 
+        store = self.permit_store
+        if store is not None and getattr(store, "extraction_errors", None):
+            return safe_hold
+
         if not permit_context:
-            store = self.permit_store
             if store is not None and getattr(store, "extraction_errors", None) and not store.enabled:
                 return safe_hold
             # A usable permit store with no semantic search candidate is a
@@ -2720,15 +2734,7 @@ class JudgeEngine:
                 "permit_match_status는 matched, ambiguous, not_found 중 하나여야 합니다.",
             ]
         )
-        llm_criteria = "\n".join(
-            [
-                "[SP 문서의 시험기준]",
-                clean_text(record.criteria),
-                "",
-                "[허가서 전체 검색 근거]",
-                permit_context,
-            ]
-        )
+        llm_criteria = "\n".join(["[SP 문서의 시험기준]", clean_text(record.criteria)])
 
         try:
             response = client.explain(
@@ -2761,7 +2767,7 @@ class JudgeEngine:
                 "허가서 시험 매칭이 불명확하여 검수보류로 판단했습니다.",
                 "permit_pdf_llm_authoritative",
                 clean_text(getattr(response, "permit_basis", None)) or norm_criteria,
-                clean_text(getattr(response, "normalized_result", None)) or norm_result or clean_text(record.result),
+                norm_result or clean_text(record.result),
                 "permit_pdf_llm_authoritative",
             )
         if match_status != "matched" or response_status not in {PASS_LABEL, FAIL_LABEL}:
@@ -2771,41 +2777,57 @@ class JudgeEngine:
         basis = clean_text(getattr(response, "permit_basis", None))
         context_compact = _compact_semantic(permit_context)
 
-        def grounded(value: str) -> bool:
-            compact = _compact_semantic(value)
-            return bool(
-                compact
-                and re.search(r"[a-zA-Z가-힣]", value)
-                and compact in context_compact
-            )
+        generic_test_titles = {"시험", "확인시험", "성상", "무균시험"}
+        generic_basis_fragments = {"기준", "허가서", "조건", "시험", "확인", "일"}
 
-        if not grounded(matched_test) or not grounded(basis):
+        def grounded(value: str, *, test_identity: bool = False) -> bool:
+            raw_parts = re.split(r"\s*(?:>|/|\\|\||≫|→|,|;|:)\s*", value)
+            parts: list[str] = []
+            for raw_part in raw_parts:
+                part = re.sub(r"^\s*\d+(?:\.\d+)+\.?\s*", "", raw_part).strip()
+                compact = _compact_semantic(part)
+                if not compact or len(compact) < 2 or re.fullmatch(r"\d+(?:\.\d+)*", compact):
+                    return False
+                parts.append(compact)
+            if not parts:
+                return False
+            if test_identity:
+                distinctive = [part for part in parts if part not in generic_test_titles]
+                if not distinctive:
+                    return False
+            elif len(parts) == 1 and parts[0] in generic_basis_fragments:
+                return False
+            return all(part in context_compact for part in parts)
+
+        if not grounded(matched_test, test_identity=True) or not grounded(basis):
             return safe_hold
 
         failed = getattr(response, "failed_requirements", None) or []
         if not isinstance(failed, list) or any(not grounded(clean_text(item)) for item in failed):
             return safe_hold
 
-        llm_reason = _sanitize_user_reason(getattr(response, "reason", None))
-        llm_norm_criteria = clean_text(getattr(response, "normalized_criteria", None)) or norm_criteria
-        response_norm_result = clean_text(getattr(response, "normalized_result", None))
-        llm_norm_result = response_norm_result or norm_result or clean_text(record.result)
+        trusted_result = clean_text(record.result)
+        llm_norm_criteria = basis
+        llm_norm_result = trusted_result
         if response_status == FAIL_LABEL:
             failed_text = " / ".join(clean_text(item) for item in failed if clean_text(item))
             permit_condition = basis if not failed_text else f"{basis} ({failed_text})"
-            conflict = response_norm_result or clean_text(record.result)
+            conflict = trusted_result
             reason = (
                 f"허가서 기준 '{permit_condition}'을 충족하지 못했고, SP 시험결과 '{conflict}'와 충돌하여 "
                 f"{FAIL_REASON_WORD}으로 판단했습니다."
             )
         else:
-            reason = llm_reason or f"허가서의 모든 조건을 만족하여 {PASS_REASON_WORD}으로 판단했습니다."
+            reason = (
+                f"허가서 기준 '{basis}'을 확인하고 시험결과 '{trusted_result}'가 이를 만족하여 "
+                f"{PASS_REASON_WORD}으로 판단했습니다."
+            )
 
         return (
             response_status,
             reason,
             "permit_pdf_llm_authoritative",
-            llm_norm_criteria or clean_text(getattr(response, "permit_basis", None)) or norm_criteria,
+            llm_norm_criteria or norm_criteria,
             llm_norm_result,
             "permit_pdf_llm_authoritative",
         )
@@ -3225,6 +3247,14 @@ class JudgeEngine:
                     norm_criteria = permit_norm_criteria or norm_criteria
                     norm_result = permit_norm_result or norm_result
                     source = permit_source or source
+                    for row in lot_judgements:
+                        row["status"] = permit_status
+                        row["reason"] = _sanitize_user_reason(permit_reason or row.get("reason", ""))
+                        row["source"] = permit_source or row.get("source", "")
+                        if permit_norm_criteria:
+                            row["normalized_criteria"] = permit_norm_criteria
+                        if permit_norm_result:
+                            row["normalized_result"] = permit_norm_result
 
         elif _looks_like_unparsed_table(record.result):
             comparison_completed = True
@@ -3303,6 +3333,11 @@ class JudgeEngine:
             final_status = HOLD_LABEL
             final_reason = "시험기준 또는 시험결과가 존재하지만 문서 기준과 참고 근거만으로 확정하기 어려워 검수보류로 판단했습니다."
             source = "manual_hold_before"
+            if permit_is_authoritative and record.criteria and not record.result:
+                # Without SP result evidence, do not ask the model to invent a
+                # permit comparison; expose the authoritative safe-HOLD source.
+                source = "permit_pdf_llm_authoritative"
+                final_reason = "시험결과가 없어 허가서 기준과 비교할 수 없어 검수보류로 판단했습니다."
 
         return Evaluation(
             order_idx=record.order_idx,
