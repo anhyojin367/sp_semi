@@ -17,6 +17,7 @@ from .extractor import extract_records
 from .hierarchy import build_document_tree
 from .judgement import JudgeEngine
 from .llm import ClovaJudgeClient
+from .permit_catalog import ResolvedPermit, resolve_permits
 from .permit_pdf_store import PermitPdfStore
 from .preview import render_first_page
 from .rag import UcumRagStore
@@ -2335,20 +2336,36 @@ class DocumentJudgePipeline:
         company: str | None = None,
         product: str | None = None,
         detail_store: DomainDetailStore | None = None,
+        permit_resolution: ResolvedPermit | None = None,
+        permit_enabled: bool = True,
     ) -> None:
         self.company = clean_text(company)
         self.product = clean_text(product)
         self.detail_store = detail_store or DomainDetailStore()
         self.detail_profile = self.detail_store.resolve(self.company, self.product)
+        self.permit_resolution = permit_resolution or resolve_permits(
+            permit_pdf_paths or [], self.company, self.product
+        )
+        self.permit_enabled = permit_enabled
+        active_permit_paths = (
+            list(self.permit_resolution.paths) if permit_enabled else []
+        )
+        active_permit_policy = (
+            self.permit_resolution.policy if permit_enabled else None
+        )
         self.rag_store = UcumRagStore()
         self.llm_client = ClovaJudgeClient(
             domain_detail_context=self.detail_profile.render_for_llm()
         )
-        self.permit_store = PermitPdfStore(permit_pdf_paths)
+        self.permit_store = PermitPdfStore(
+            active_permit_paths,
+            policy=active_permit_policy,
+        )
         self.judge_engine = JudgeEngine(
             self.rag_store,
             self.llm_client,
             permit_store=self.permit_store,
+            permit_policy=active_permit_policy,
         )
 
     def _activate_detail_profile(
@@ -2531,6 +2548,31 @@ class DocumentJudgePipeline:
                 "rag_sources": self.rag_store.loaded_sources,
                 "permit_pdf_count": len(self.permit_store.permit_pdf_paths),
                 "permit_chunk_count": len(self.permit_store.chunks),
+                "permit_paths": [str(path) for path in self.permit_store.permit_pdf_paths],
+                "resolved_permit_paths": [str(path) for path in self.permit_resolution.paths],
+                "permit_policy_id": (
+                    self.permit_resolution.policy.policy_id
+                    if self.permit_resolution.policy is not None
+                    else None
+                ),
+                "permit_fingerprint": self.permit_resolution.fingerprint,
+                "permit_resolution_errors": list(self.permit_resolution.errors),
+                "permit_extraction_errors": list(self.permit_store.extraction_errors),
+                "permit_extraction_diagnostics": [
+                    {
+                        "path": str(path),
+                        "ocr_mode": (
+                            self.permit_resolution.policy.ocr_mode
+                            if self.permit_resolution.policy is not None
+                            else "auto"
+                        ),
+                        "chunk_count": sum(
+                            chunk.source_file == path.name
+                            for chunk in self.permit_store.chunks
+                        ),
+                    }
+                    for path in self.permit_store.permit_pdf_paths
+                ],
                 "document_company": detail_profile.requested_company,
                 "document_product": detail_profile.requested_product,
                 "domain_detail_matched_company": detail_profile.matched_company,

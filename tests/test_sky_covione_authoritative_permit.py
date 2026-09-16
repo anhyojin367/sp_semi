@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+from pathlib import Path
+from types import SimpleNamespace
+
+import fitz
 import pytest
 
+import sp_judgement_bridge as judgement_bridge
+import sp_pdf_judger.pipeline as pipeline_module
 from sp_pdf_judger.config import FAIL_LABEL, HOLD_LABEL, PASS_LABEL
 from sp_pdf_judger.judgement import JudgeEngine
 from sp_pdf_judger.llm import ClovaJudgeClient, JudgeResponse
-from sp_pdf_judger.permit_catalog import PermitPolicy
+from sp_pdf_judger.permit_catalog import PermitPolicy, ResolvedPermit
 from sp_pdf_judger.permit_pdf_store import PermitPdfStore
 from sp_pdf_judger.schemas import ExtractedRecord
 
@@ -70,6 +76,170 @@ def _engine(client, policy=AUTHORITATIVE_POLICY):
         permit_store=_store(policy),
         permit_policy=policy,
     )
+
+
+class _CapturingPermitStore:
+    def __init__(self, permit_pdf_paths=None, policy=None):
+        self.permit_pdf_paths = list(permit_pdf_paths or [])
+        self.policy = policy
+        self.chunks = []
+        self.extraction_errors = []
+        self.extraction_diagnostics = []
+
+    @property
+    def enabled(self):
+        return False
+
+
+class _PipelineRag:
+    docs = []
+    loaded_sources = []
+
+    def search(self, query, top_k=9):
+        return []
+
+
+class _PipelineLlm:
+    enabled = False
+    model = "test"
+    call_count = 0
+    success_count = 0
+    last_error = None
+
+    def __init__(self, **_kwargs):
+        pass
+
+    def set_domain_detail_context(self, _context):
+        pass
+
+
+def test_pipeline_scopes_authoritative_policy_to_exact_company_and_product(monkeypatch, tmp_path):
+    """Catch accidental catalog activation outside the company/product pair."""
+    monkeypatch.setattr(pipeline_module, "PermitPdfStore", _CapturingPermitStore)
+    monkeypatch.setattr(pipeline_module, "UcumRagStore", _PipelineRag)
+    monkeypatch.setattr(pipeline_module, "ClovaJudgeClient", _PipelineLlm)
+
+    target = pipeline_module.DocumentJudgePipeline(
+        company="SK bioscience",
+        product="SKYCovione",
+    )
+    wrong_company = pipeline_module.DocumentJudgePipeline(
+        company="다른 회사",
+        product="SKYCovione",
+    )
+    wrong_product = pipeline_module.DocumentJudgePipeline(
+        company="SK bioscience",
+        product="다른 제품",
+    )
+    explicit = tmp_path / "linked-non-target.pdf"
+    explicit.write_bytes(b"not a catalog permit")
+    linked_non_target = pipeline_module.DocumentJudgePipeline(
+        permit_pdf_paths=[explicit],
+        company="다른 회사",
+        product="다른 제품",
+    )
+
+    assert target.judge_engine.permit_policy is not None
+    assert target.judge_engine.permit_policy.authoritative is True
+    assert [path.name for path in target.permit_store.permit_pdf_paths] == [
+        "sky_covione_multidose.pdf"
+    ]
+    assert wrong_company.judge_engine.permit_policy is None
+    assert wrong_company.permit_store.permit_pdf_paths == []
+    assert wrong_product.judge_engine.permit_policy is None
+    assert wrong_product.permit_store.permit_pdf_paths == []
+    assert linked_non_target.permit_store.permit_pdf_paths == [explicit.resolve()]
+    assert linked_non_target.judge_engine.permit_policy is None
+
+
+def test_bridge_cache_key_includes_resolved_permit_fingerprint(tmp_path):
+    """Catch stale after-artifacts when a catalog decision changes without UI paths."""
+    pdf_path = tmp_path / "source.pdf"
+    pdf_path.write_bytes(b"source")
+
+    before = judgement_bridge._artifact_key(
+        pdf_path, [], None, "SK bioscience", "SKYCovione", "detail", "permit-v1"
+    )
+    after = judgement_bridge._artifact_key(
+        pdf_path, [], None, "SK bioscience", "SKYCovione", "detail", "permit-v2"
+    )
+
+    assert before != after
+
+
+def test_bridge_resolves_once_and_reuses_one_resolution_for_before_and_after(monkeypatch, tmp_path):
+    """Catch divergent catalog reads between cache construction and pipeline phases."""
+    pdf_path = tmp_path / "source.pdf"
+    pdf_path.write_bytes(b"source")
+    explicit = tmp_path / "linked.pdf"
+    explicit.write_bytes(b"permit")
+    policy = PermitPolicy("sky", True, True, True, "auto")
+    resolution = ResolvedPermit(
+        policy, (explicit.resolve(),), "resolved-fingerprint", ("catalog diagnostic",)
+    )
+    resolve_calls = []
+    pipeline_calls = []
+
+    def resolve_once(paths, company, product):
+        resolve_calls.append((list(paths), company, product))
+        return resolution
+
+    class Pipeline:
+        def __init__(self, **kwargs):
+            pipeline_calls.append(kwargs)
+
+        def run(self, _pdf_path, **_kwargs):
+            return SimpleNamespace(
+                extracted_records=[],
+                metadata={"permit_extraction_diagnostics": [{"path": str(explicit)}]},
+            )
+
+    monkeypatch.setattr(judgement_bridge, "resolve_permits", resolve_once)
+    monkeypatch.setattr(judgement_bridge, "DocumentJudgePipeline", Pipeline)
+    monkeypatch.setattr(judgement_bridge, "_write_summary_csv_from_result", lambda *_args: None)
+    monkeypatch.setattr(judgement_bridge, "_attach_rule_regression_log", lambda artifacts: artifacts)
+    monkeypatch.setattr(judgement_bridge, "_remember_judgement_artifacts", lambda _artifacts: None)
+
+    artifacts = judgement_bridge.ensure_judgement_artifacts(
+        pdf_path=pdf_path,
+        permit_paths=[explicit],
+        original_csv_dir=None,
+        company="SK bioscience",
+        product="SKYCovione",
+    )
+
+    assert len(resolve_calls) == 1
+    assert len(pipeline_calls) == 2
+    assert all(call["permit_resolution"] is resolution for call in pipeline_calls)
+    assert pipeline_calls[0]["permit_enabled"] is False
+    assert pipeline_calls[1]["permit_pdf_paths"] == [explicit.resolve()]
+    assert artifacts["permit_fingerprint"] == "resolved-fingerprint"
+    assert artifacts["permit_policy_id"] == "sky"
+    assert artifacts["permit_resolution_errors"] == ["catalog diagnostic"]
+
+
+def test_pipeline_metadata_includes_permit_resolution_and_extraction_diagnostics(monkeypatch, tmp_path):
+    """Catch loss of resolution observability while retaining legacy metadata."""
+    pdf_path = tmp_path / "source.pdf"
+    document = fitz.open()
+    document.new_page()
+    document.save(pdf_path)
+    document.close()
+    explicit_permit = tmp_path / "linked-non-target.pdf"
+    explicit_permit.write_bytes(b"not a pdf")
+    monkeypatch.setattr(pipeline_module, "UcumRagStore", _PipelineRag)
+    monkeypatch.setattr(pipeline_module, "ClovaJudgeClient", _PipelineLlm)
+
+    result = pipeline_module.DocumentJudgePipeline(
+        permit_pdf_paths=[explicit_permit], company="다른 회사", product="다른 제품"
+    ).run(pdf_path, extracted_records=[])
+
+    assert result.metadata["permit_paths"] == [str(explicit_permit.resolve())]
+    assert result.metadata["permit_policy_id"] is None
+    assert result.metadata["permit_extraction_errors"]
+    assert result.metadata["permit_extraction_diagnostics"]
+    assert "llm_enabled" in result.metadata
+    assert "record_count" in result.metadata
 
 
 def test_mapped_permit_fail_overrides_sp_pass_and_composes_reason():
@@ -397,6 +567,25 @@ def test_generated_wrapper_and_generic_basis_fragments_are_not_grounded(basis):
     assert evaluation.final_status == HOLD_LABEL
 
 
+@pytest.mark.parametrize("basis", ["만족해야 한다", "충족해야 한다", "conditions", "requirements"])
+def test_satisfaction_only_basis_is_not_concrete_even_when_verbatim_in_permit_context(basis):
+    """Catch boilerplate that a model could quote without naming a permit condition."""
+    response = JudgeResponse(
+        status=PASS_LABEL,
+        reason="검수합격",
+        permit_match_status="matched",
+        matched_permit_test="유정란접종시험",
+        permit_basis=basis,
+    )
+    store = _store(text=f"3.2.1 유정란접종시험\n{basis}\n")
+
+    evaluation = JudgeEngine(
+        EmptyRagStore(), FakePermitLLM(response), store, AUTHORITATIVE_POLICY
+    ).judge_record(_record())
+
+    assert evaluation.final_status == HOLD_LABEL
+
+
 @pytest.mark.parametrize(
     "basis",
     ["이상이어야", "이상이어야 한다", "최소이어야", "minimum", "days", "at least", "must be", "없어야 한다", "21"],
@@ -423,7 +612,7 @@ def test_vague_criterion_grammar_or_bare_number_is_not_concrete(basis):
         ("최소 21일", "3.2.1 유정란접종시험\n최소 21일 배양해야 한다"),
         ("36 ± 2 ℃", "3.2.1 유정란접종시험\n36 ± 2 ℃에서 배양해야 한다"),
         ("혈구응집반응이 없어야 한다", "3.2.1 유정란접종시험\n혈구응집반응이 없어야 한다"),
-        ("발색된 점이 확인되어야 한다", "3.2.1 유정란접종시험\n발색된 점이 확인되어야 한다"),
+        ("발색된 점이 확인되어야 한다", "2.3.1.7 Component B 확인시험\n반응 후 발색된 점이 확인되어야 한다"),
         ("음성이어야 한다", "3.2.1 유정란접종시험\n음성이어야 한다"),
     ],
 )

@@ -19,6 +19,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from sp_pdf_judger.domain_details import resolve_domain_detail_profile
+from sp_pdf_judger.permit_catalog import resolve_permits
 from sp_pdf_judger.pipeline import DocumentJudgePipeline
 from sp_pdf_judger.stage_csv_exporter import (
     _is_albumin_document,
@@ -47,7 +48,7 @@ JUDGE_COMPONENT_HEIGHT = 10000
 FINAL_JUDGEMENT_VIEWPORT_HEIGHT = 860
 JUDGEMENT_STATUS_DIR = Path(__file__).resolve().parent / ".sp_judgement_status"
 JUDGEMENT_STATUS_INDEX = JUDGEMENT_STATUS_DIR / "status_index.json"
-JUDGEMENT_CACHE_VERSION = "sp-app-direct-bridge-v53-20260729-domain-details"
+JUDGEMENT_CACHE_VERSION = "sp-app-direct-bridge-v54-20260916-permit-resolution"
 
 
 # ============================================================
@@ -74,6 +75,7 @@ def _artifact_key(
     company: str = "",
     product: str = "",
     detail_fingerprint: str = "",
+    permit_fingerprint: str = "",
 ) -> str:
     permit_sig = "::".join(_file_sig(path) for path in permit_paths) if permit_paths else "no_permit"
     csv_sig = _file_sig(original_csv_dir) if original_csv_dir else "no_csv_dir"
@@ -83,7 +85,7 @@ def _artifact_key(
         f"{_file_sig(pdf_path)}::"
         f"{permit_sig}::"
         f"{csv_sig}::"
-        f"{company.strip()}::{product.strip()}::{detail_fingerprint}"
+        f"{company.strip()}::{product.strip()}::{detail_fingerprint}::{permit_fingerprint}"
     )
 
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
@@ -453,6 +455,11 @@ def _remember_judgement_artifacts(artifacts: dict[str, Any]) -> None:
         "summary_before_path": str(persisted_before),
         "summary_after_path": str(persisted_after),
         "permit_paths": [str(path) for path in artifacts.get("permit_paths", [])],
+        "resolved_permit_paths": [str(path) for path in artifacts.get("resolved_permit_paths", [])],
+        "permit_policy_id": artifacts.get("permit_policy_id"),
+        "permit_fingerprint": str(artifacts.get("permit_fingerprint") or ""),
+        "permit_resolution_errors": list(artifacts.get("permit_resolution_errors", []) or []),
+        "permit_extraction_diagnostics": list(artifacts.get("permit_extraction_diagnostics", []) or []),
         "company": str(artifacts.get("company") or ""),
         "product": str(artifacts.get("product") or ""),
         "detail_fingerprint": str(artifacts.get("detail_fingerprint") or ""),
@@ -1126,19 +1133,22 @@ def ensure_judgement_artifacts(
       -> summary_after.csv
     """
     pdf_path = Path(pdf_path)
-    permit_paths = [Path(path) for path in permit_paths if Path(path).exists()]
+    permit_paths = [Path(path) for path in permit_paths]
     original_csv_dir = Path(original_csv_dir) if original_csv_dir else None
     company = str(company or "").strip()
     product = str(product or "").strip()
     detail_profile = resolve_domain_detail_profile(company, product)
+    permit_resolution = resolve_permits(permit_paths, company, product)
+    resolved_permit_paths = list(permit_resolution.paths)
 
     key = _artifact_key(
         pdf_path,
-        permit_paths,
+        resolved_permit_paths,
         original_csv_dir,
         company,
         product,
         detail_profile.fingerprint,
+        permit_resolution.fingerprint,
     )
     session_key = f"sp_direct_judgement_artifacts::{key}"
 
@@ -1174,7 +1184,20 @@ def ensure_judgement_artifacts(
                 artifacts["before_stage_dir"] = before_stage_dir
                 artifacts["after_stage_dir"] = after_stage_dir
                 artifacts["pdf_path"] = pdf_path
-                artifacts["permit_paths"] = permit_paths
+                artifacts["permit_paths"] = resolved_permit_paths
+                artifacts["resolved_permit_paths"] = resolved_permit_paths
+                artifacts["permit_policy_id"] = (
+                    permit_resolution.policy.policy_id
+                    if permit_resolution.policy is not None
+                    else None
+                )
+                artifacts["permit_fingerprint"] = permit_resolution.fingerprint
+                artifacts["permit_resolution_errors"] = list(permit_resolution.errors)
+                artifacts["permit_extraction_diagnostics"] = list(
+                    getattr(artifacts.get("after_result"), "metadata", {}).get(
+                        "permit_extraction_diagnostics", []
+                    )
+                )
                 if original_csv_dir and original_csv_dir.exists():
                     artifacts["runtime_csv_dir"] = _prepare_runtime_simulation_csv_dir(
                         original_csv_dir=original_csv_dir,
@@ -1198,14 +1221,17 @@ def ensure_judgement_artifacts(
             permit_pdf_paths=[],
             company=company,
             product=product,
+            permit_resolution=permit_resolution,
+            permit_enabled=False,
         )
         before_result = before_pipeline.run(pdf_path)
 
-        if permit_paths:
+        if resolved_permit_paths:
             after_pipeline = DocumentJudgePipeline(
-                permit_pdf_paths=permit_paths,
+                permit_pdf_paths=resolved_permit_paths,
                 company=company,
                 product=product,
+                permit_resolution=permit_resolution,
             )
             after_result = after_pipeline.run(
                 pdf_path,
@@ -1258,7 +1284,18 @@ def ensure_judgement_artifacts(
         "after_stage_dir": after_stage_dir,
         "runtime_csv_dir": runtime_csv_dir,
         "pdf_path": pdf_path,
-        "permit_paths": permit_paths,
+        "permit_paths": resolved_permit_paths,
+        "resolved_permit_paths": resolved_permit_paths,
+        "permit_policy_id": (
+            permit_resolution.policy.policy_id
+            if permit_resolution.policy is not None
+            else None
+        ),
+        "permit_fingerprint": permit_resolution.fingerprint,
+        "permit_resolution_errors": list(permit_resolution.errors),
+        "permit_extraction_diagnostics": list(
+            after_result.metadata.get("permit_extraction_diagnostics", [])
+        ),
         "company": company,
         "product": product,
         "detail_fingerprint": detail_profile.fingerprint,

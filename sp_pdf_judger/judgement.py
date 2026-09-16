@@ -719,7 +719,7 @@ def _compact_semantic(text: str | None) -> str:
 
 
 def _is_concrete_permit_basis(value: str | None) -> bool:
-    """Require a permit basis to carry a concrete condition, not grammar alone."""
+    """Require a permit basis to name a condition, not only compliance boilerplate."""
     raw = clean_text(value)
     compact = _compact_semantic(raw)
     if not compact or re.fullmatch(r"\d+(?:\.\d+)*", compact):
@@ -736,14 +736,18 @@ def _is_concrete_permit_basis(value: str | None) -> bool:
     grammar_patterns = (
         r"(?:이상|이하|미만|초과|최소|최대)\s*이어야\s*(?:한다)?",
         r"(?:없어야|있어야|확인되어야|이어야)\s*(?:한다)?",
-        r"\b(?:minimum|maximum|day|days|at least|at most|must|should|be|criteria|requirement|test)\b",
+        r"(?:만족|충족|준수)\s*(?:해야|하여야)?\s*(?:한다|함|된다|됩니다)?",
+        r"\b(?:minimum|maximum|day|days|at least|at most|must|should|be|"
+        r"conditions?|requirements?|criteria|test)\b",
     )
     for pattern in grammar_patterns:
         subject = re.sub(pattern, " ", subject)
 
     generic_words = (
         "허가서", "permit", "pdf", "판정", "후보", "문단", "시험", "확인", "성상", "무균시험",
-        "기준", "조건", "이상", "이하", "미만", "초과", "최소", "최대", "일", "개",
+        "기준", "조건", "요건", "요구사항", "requirement", "requirements",
+        "condition", "conditions", "criteria", "criterion", "satisfaction", "compliance",
+        "만족", "충족", "준수", "이상", "이하", "미만", "초과", "최소", "최대", "일", "개",
     )
     for word in generic_words:
         subject = subject.replace(word, " ")
