@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+import re
+import subprocess
 
 import fitz
 import pytest
+from PIL import Image, ImageDraw, ImageFont
 
 import sp_pdf_judger.permit_ocr as permit_ocr
 from sp_pdf_judger.permit_ocr import (
@@ -284,3 +288,55 @@ def test_supplied_permit_pdf_recovers_required_pages_and_uses_cache(
 
     assert second_errors == []
     assert second_pages == first_pages
+
+
+def test_windows_ocr_helper_orders_nonempty_korean_images_numerically(tmp_path: Path) -> None:
+    if os.name != "nt":
+        pytest.skip("requires Windows Media OCR")
+    powershell = Path(os.environ.get("WINDIR", r"C:\Windows")) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    font_path = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts" / "malgun.ttf"
+    if not powershell.exists():
+        pytest.skip("requires Windows PowerShell 5.1")
+    if not font_path.exists():
+        pytest.skip("requires the Malgun Gothic Korean font")
+
+    font = ImageFont.truetype(font_path, 44)
+    for page_number in (10, 2):
+        image = Image.new("RGB", (900, 260), "white")
+        ImageDraw.Draw(image).text(
+            (40, 90), f"\ud398\uc774\uc9c0 {page_number} \ud55c\uad6d\uc5b4 \uc2dc\ud5d8", font=font, fill="black"
+        )
+        image.save(tmp_path / f"page-{page_number}.png")
+
+    helper = Path(__file__).parents[1] / "scripts" / "windows_ocr_images.ps1"
+    result = subprocess.run(
+        [
+            str(powershell),
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(helper),
+            str(tmp_path),
+        ],
+        shell=False,
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    payload = json.loads(result.stdout)
+    if payload.get("errors") and any(
+        "Windows Media OCR" in str(error) or "ko-KR" in str(error)
+        for error in payload["errors"]
+    ):
+        pytest.skip("Windows Media OCR with ko-KR is unavailable")
+
+    assert result.returncode == 0, result.stderr
+    assert payload["errors"] == []
+    assert [page["page_number"] for page in payload["pages"]] == [2, 10]
+    for page in payload["pages"]:
+        normalized = re.sub(r"\s+", "", page["text"])
+        assert "페이지" in normalized
+        assert "한국어" in normalized
