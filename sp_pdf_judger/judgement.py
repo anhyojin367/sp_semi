@@ -2460,6 +2460,18 @@ class JudgeEngine:
         if not chunks:
             return ""
 
+        if self.permit_policy is not None and self.permit_policy.authoritative:
+            # Authoritative judging must see every retrieved chunk in full.  The
+            # legacy candidate clipping below remains unchanged for other policies.
+            context = self.permit_store.format_context(chunks).strip()
+            if not context:
+                return ""
+            return (
+                "[허가서 PDF 판정 후보 문단]\n"
+                "아래 내용은 허가서 PDF에서 검색된 전체 후보 문단입니다.\n"
+                + context
+            )
+
         direct_snippets: list[str] = []
         candidate_snippets: list[str] = []
 
@@ -2671,10 +2683,15 @@ class JudgeEngine:
         )
 
         if not permit_context:
-            return safe_hold
+            store = self.permit_store
+            if store is not None and getattr(store, "extraction_errors", None) and not store.enabled:
+                return safe_hold
+            # A usable permit store with no semantic search candidate is a
+            # genuine not-found case, so retain the primary SP verdict.
+            return None, None, None, None, None, None
 
         client = self.llm_client
-        if client is None or getattr(client, "enabled", True) is False:
+        if client is None or not getattr(client, "enabled", True):
             return safe_hold
 
         query = " ".join(
@@ -2730,6 +2747,10 @@ class JudgeEngine:
         if response is None or not getattr(response, "status", None):
             return safe_hold
 
+        response_status = clean_text(getattr(response, "status", None))
+        if response_status not in {PASS_LABEL, FAIL_LABEL, HOLD_LABEL}:
+            return safe_hold
+
         match_status = clean_text(getattr(response, "permit_match_status", None)).casefold()
         if match_status == "not_found":
             # No mapped permit requirement: the primary SP verdict remains authoritative.
@@ -2743,27 +2764,45 @@ class JudgeEngine:
                 clean_text(getattr(response, "normalized_result", None)) or norm_result or clean_text(record.result),
                 "permit_pdf_llm_authoritative",
             )
-        if match_status != "matched" or response.status not in {PASS_LABEL, FAIL_LABEL}:
+        if match_status != "matched" or response_status not in {PASS_LABEL, FAIL_LABEL}:
+            return safe_hold
+
+        matched_test = clean_text(getattr(response, "matched_permit_test", None))
+        basis = clean_text(getattr(response, "permit_basis", None))
+        context_compact = _compact_semantic(permit_context)
+
+        def grounded(value: str) -> bool:
+            compact = _compact_semantic(value)
+            return bool(
+                compact
+                and re.search(r"[a-zA-Z가-힣]", value)
+                and compact in context_compact
+            )
+
+        if not grounded(matched_test) or not grounded(basis):
+            return safe_hold
+
+        failed = getattr(response, "failed_requirements", None) or []
+        if not isinstance(failed, list) or any(not grounded(clean_text(item)) for item in failed):
             return safe_hold
 
         llm_reason = _sanitize_user_reason(getattr(response, "reason", None))
         llm_norm_criteria = clean_text(getattr(response, "normalized_criteria", None)) or norm_criteria
-        llm_norm_result = clean_text(getattr(response, "normalized_result", None)) or norm_result or clean_text(record.result)
-        if response.status == FAIL_LABEL:
-            basis = clean_text(getattr(response, "permit_basis", None))
-            failed = getattr(response, "failed_requirements", None) or []
+        response_norm_result = clean_text(getattr(response, "normalized_result", None))
+        llm_norm_result = response_norm_result or norm_result or clean_text(record.result)
+        if response_status == FAIL_LABEL:
             failed_text = " / ".join(clean_text(item) for item in failed if clean_text(item))
-            basis = basis or failed_text or "허가서 요구조건"
-            conflict = failed_text or llm_norm_result or clean_text(record.result)
+            permit_condition = basis if not failed_text else f"{basis} ({failed_text})"
+            conflict = response_norm_result or clean_text(record.result)
             reason = (
-                f"허가서 기준 '{basis}'을 충족하지 못했고, SP 시험결과 '{conflict}'와 충돌하여 "
+                f"허가서 기준 '{permit_condition}'을 충족하지 못했고, SP 시험결과 '{conflict}'와 충돌하여 "
                 f"{FAIL_REASON_WORD}으로 판단했습니다."
             )
         else:
             reason = llm_reason or f"허가서의 모든 조건을 만족하여 {PASS_REASON_WORD}으로 판단했습니다."
 
         return (
-            response.status,
+            response_status,
             reason,
             "permit_pdf_llm_authoritative",
             llm_norm_criteria or clean_text(getattr(response, "permit_basis", None)) or norm_criteria,
@@ -3045,8 +3084,13 @@ class JudgeEngine:
             or "항목"
         )
 
-        allow_permit = bool(self.permit_store is not None and self.permit_store.enabled)
+        permit_is_authoritative = bool(self.permit_policy is not None and self.permit_policy.authoritative)
+        allow_permit = bool(
+            self.permit_store is not None
+            and (self.permit_store.enabled or permit_is_authoritative)
+        )
         lot_judgements: list[dict[str, str]] = []
+        table_status: str | None = None
 
         table_rows = _parse_structured_result_table_from_record(record)
 
@@ -3160,6 +3204,28 @@ class JudgeEngine:
                 "rule_before",
             )
 
+            # A table-wide deterministic result is already aggregated above;
+            # run one authoritative permit phase at that aggregate boundary.
+            if table_status is not None and allow_permit and permit_is_authoritative:
+                permit_context = self._get_permit_context(record)
+                permit_status, permit_reason, permit_comparator, permit_norm_criteria, permit_norm_result, permit_source = self._judge_with_permit_second_phase(
+                    record=record,
+                    title=title,
+                    permit_context=permit_context,
+                    first_status=final_status,
+                    first_reason=final_reason,
+                    comparator=comparator,
+                    norm_criteria=norm_criteria,
+                    norm_result=norm_result,
+                )
+                if permit_status is not None:
+                    final_status = permit_status
+                    final_reason = permit_reason or final_reason
+                    comparator = permit_comparator or comparator
+                    norm_criteria = permit_norm_criteria or norm_criteria
+                    norm_result = permit_norm_result or norm_result
+                    source = permit_source or source
+
         elif _looks_like_unparsed_table(record.result):
             comparison_completed = True
             final_status = HOLD_LABEL
@@ -3211,6 +3277,26 @@ class JudgeEngine:
                 final_status = HOLD_LABEL
                 final_reason = "시험결과는 존재하지만 문서 기준과 참고 근거만으로 확정하기 어려워 검수보류로 판단했습니다."
                 source = "manual_hold_before"
+
+            if allow_permit and permit_is_authoritative:
+                permit_context = self._get_permit_context(record)
+                permit_status, permit_reason, permit_comparator, permit_norm_criteria, permit_norm_result, permit_source = self._judge_with_permit_second_phase(
+                    record=record,
+                    title=title,
+                    permit_context=permit_context,
+                    first_status=final_status,
+                    first_reason=final_reason,
+                    comparator=comparator,
+                    norm_criteria=norm_criteria,
+                    norm_result=norm_result,
+                )
+                if permit_status is not None:
+                    final_status = permit_status
+                    final_reason = permit_reason or final_reason
+                    comparator = permit_comparator or comparator
+                    norm_criteria = permit_norm_criteria or norm_criteria
+                    norm_result = permit_norm_result or norm_result
+                    source = permit_source or source
 
         elif record.criteria or record.result:
             comparison_completed = True
