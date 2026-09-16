@@ -219,3 +219,31 @@ def test_component_b_normalizes_mixed_language_spacing_and_number_variants() -> 
     chunks = store.search(record)
 
     assert chunks[0].title == "확인 시험"
+
+
+@pytest.mark.parametrize("stage", ["시험", "기준", "test"])
+def test_generic_test_does_not_use_generic_only_stage_overlap(stage: str) -> None:
+    store = PermitPdfStore.from_page_texts(
+        [(1, f"2.3. {stage}\n2.3.1.7. 확인시험\n공통 확인 기준")],
+        policy=SKY_POLICY,
+    )
+    record = ExtractedRecord(section_title=stage, test_name="9.8.7. 확인시험")
+
+    assert store.search(record) == []
+
+
+@pytest.mark.parametrize(
+    "page",
+    [
+        (None, "text"),
+        (True, "text"),
+        (0, "text"),
+        (-1, "text"),
+        ("1", "text"),
+        (1, None),
+        (1, 7),
+    ],
+)
+def test_from_page_texts_rejects_invalid_two_tuple_metadata(page: tuple[object, object]) -> None:
+    with pytest.raises(ValueError, match="positive non-bool int page number and str text"):
+        PermitPdfStore.from_page_texts([page])

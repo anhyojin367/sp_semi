@@ -14,7 +14,7 @@ from .utils import clean_text
 _HEADING_RE = re.compile(r"(?m)^\s*(?P<section>\d+(?:\.\d+)+(?:\.)?)\s+(?P<title>[^\n]+?)\s*$")
 _LEADING_SECTION_RE = re.compile(r"^\s*\d+(?:\.\d+)+(?:\.)?\s*")
 _NON_IDENTITY_RE = re.compile(r"[^0-9a-zA-Z가-힣]+")
-_GENERIC_TEST_NAMES = {"확인시험", "성상", "무균시험"}
+_GENERIC_TEST_NAMES = {"확인시험", "성상", "무균시험", "시험"}
 _GENERIC_STAGE_TOKENS = {"시험", "기준", "대한", "및", "test"}
 
 
@@ -48,8 +48,25 @@ def _record_path_values(record: ExtractedRecord) -> list[str]:
 
 def _stage_match_score(record_stage: str, chunk_stage: str) -> float:
     """Score actual stage overlap, favoring a specific normalized path."""
-    record_identity = _compact_identity(record_stage, strip_number=True)
-    chunk_identity = _compact_identity(chunk_stage, strip_number=True)
+    def meaningful_tokens(value: str) -> set[str]:
+        return {
+            token
+            for token in re.findall(r"[a-z]+|[가-힣]+", normalize_permit_heading(value).casefold())
+            if token not in _GENERIC_STAGE_TOKENS
+        }
+
+    record_tokens = meaningful_tokens(record_stage)
+    chunk_tokens = meaningful_tokens(chunk_stage)
+    record_identity = "".join(
+        token
+        for token in re.findall(r"[a-z]+|[가-힣]+", normalize_permit_heading(record_stage).casefold())
+        if token not in _GENERIC_STAGE_TOKENS
+    )
+    chunk_identity = "".join(
+        token
+        for token in re.findall(r"[a-z]+|[가-힣]+", normalize_permit_heading(chunk_stage).casefold())
+        if token not in _GENERIC_STAGE_TOKENS
+    )
     if not record_identity or not chunk_identity:
         return 0.0
     if record_identity == chunk_identity:
@@ -59,16 +76,6 @@ def _stage_match_score(record_stage: str, chunk_stage: str) -> float:
     if chunk_identity in record_identity:
         return 20.0 + (30.0 * len(chunk_identity) / len(record_identity))
 
-    record_tokens = {
-        token
-        for token in re.findall(r"[a-z]+|[가-힣]+", record_stage.casefold())
-        if token not in _GENERIC_STAGE_TOKENS
-    }
-    chunk_tokens = {
-        token
-        for token in re.findall(r"[a-z]+|[가-힣]+", chunk_stage.casefold())
-        if token not in _GENERIC_STAGE_TOKENS
-    }
     overlap = record_tokens & chunk_tokens
     if not overlap:
         return 0.0
@@ -200,6 +207,15 @@ class PermitPdfStore:
                 if not isinstance(raw_page, tuple) or len(raw_page) != 2:
                     raise ValueError("page texts must contain (page_number, text) tuples")
                 page_number, page_text = raw_page[0], raw_page[1]
+                if (
+                    not isinstance(page_number, int)
+                    or isinstance(page_number, bool)
+                    or page_number <= 0
+                    or not isinstance(page_text, str)
+                ):
+                    raise ValueError(
+                        "page texts require a positive non-bool int page number and str text"
+                    )
             text = clean_text(page_text or "")
             if not text:
                 continue
