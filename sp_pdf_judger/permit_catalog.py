@@ -39,10 +39,10 @@ def resolve_permits(explicit_paths: Iterable[Path], company: str | None, product
     explicit: list[Path] = []
     seen: set[Path] = set()
     for raw_path in explicit_paths:
-        path = Path(raw_path)
+        path = Path(raw_path).resolve()
         if path.is_file() and path not in seen:
             explicit.append(path); seen.add(path)
-    root = Path(package_dir) if package_dir is not None else Path(__file__).parent
+    root = (Path(package_dir) if package_dir is not None else Path(__file__).parent).resolve()
     catalog_path = root / "permits" / "catalog.json"
     entry: dict[str, Any] | None = None
     policy: PermitPolicy | None = None
@@ -66,7 +66,8 @@ def resolve_permits(explicit_paths: Iterable[Path], company: str | None, product
             actual_hash = _sha256(catalog_file)
             if actual_hash.casefold() != str(entry.get("sha256", "")).casefold():
                 errors.append(f"catalog sha256 mismatch for {catalog_file}")
-            elif catalog_file not in seen:
-                resolved.append(catalog_file); hashes.append(actual_hash)
+            else:
+                if catalog_file not in seen:
+                    resolved.append(catalog_file); hashes.append(actual_hash)
                 policy = PermitPolicy(str(entry["policy_id"]), bool(entry["authoritative"]), bool(entry["ignore_section_numbers"]), bool(entry["require_llm"]), str(entry["ocr_mode"]))
     return ResolvedPermit(policy, tuple(resolved), _fingerprint(entry, tuple(resolved), tuple(hashes)), tuple(errors))

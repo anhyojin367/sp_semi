@@ -60,3 +60,25 @@ def test_explicit_paths_are_deduplicated_before_catalog_path(tmp_path):
     first.write_bytes(b"explicit")
     result = resolve_permits([first, first], "SK바이오사이언스", "스카이코비원", package)
     assert result.paths == (first, package / "permits" / "documents" / "fixture.pdf")
+
+
+def test_equivalent_explicit_path_spellings_deduplicate_to_one_resolved_path(tmp_path):
+    first = tmp_path / "nested" / "explicit.pdf"
+    first.parent.mkdir()
+    first.write_bytes(b"explicit")
+    equivalent = first.parent / ".." / "nested" / first.name
+
+    result = resolve_permits([equivalent, first], None, None, tmp_path)
+
+    assert result.paths == (first.resolve(),)
+
+
+def test_explicit_catalog_document_still_produces_authoritative_policy(tmp_path):
+    package = _catalog(tmp_path, sha256="85441a43c7cb9f242a5c20c6648026689c795ad4e8321e215bf68d48fc9a4b1c")
+    catalog_file = package / "permits" / "documents" / "fixture.pdf"
+
+    result = resolve_permits([catalog_file], "SK바이오사이언스", "스카이코비원", package)
+
+    assert result.policy is not None
+    assert result.policy.authoritative is True
+    assert result.paths == (catalog_file.resolve(),)
