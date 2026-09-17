@@ -64,6 +64,28 @@ def test_component_b_identity_ignores_dotted_numbers_and_keeps_page_continuation
     assert "엔도톡신" not in chunks[0].text
 
 
+def test_parent_context_includes_three_level_children_across_pages() -> None:
+    store = PermitPdfStore.from_page_texts(
+        [
+            (4, "2.1.2. 외래성인자부정시험(in vivo)\n상위 공통기준\n"
+                "2.1.2.1. 마우스접종시험\n최소 10개를 14일 관찰하고 80% 이상 생존"),
+            (5, "2.1.2.1.1. 추가 관찰\n28일 관찰\n"
+                "2.1.2.2. 유정란접종시험\n요막강 및 난황낭 시험\n"
+                "2.1.3. 다음 시험\n다음 시험만의 기준"),
+        ], policy=SKY_POLICY, source_file="permit.pdf",
+    )
+    record = ExtractedRecord(test_name="외래성인자부정시험(in vivo)")
+
+    parent = store.search(record)[0]
+    child = next(chunk for chunk in store.chunks if chunk.title == "마우스접종시험")
+
+    assert parent.page_start == 4 and parent.page_end == 5
+    assert all(token in parent.text for token in ("상위 공통기준", "최소 10개", "14일", "80%", "28일", "유정란접종시험"))
+    assert "다음 시험만의 기준" not in parent.text
+    assert "최소 10개" in child.text and "28일" in child.text
+    assert "유정란접종시험" not in child.text
+
+
 def test_generic_confirmation_test_requires_component_b_stage_match_not_input_order() -> None:
     store = PermitPdfStore.from_page_texts(
         [
@@ -115,6 +137,20 @@ def test_generic_test_with_no_stage_path_is_not_a_direct_match() -> None:
     )
 
     assert store.search(_component_b_record()) == []
+
+
+@pytest.mark.parametrize("test_name", ["성상", "무균시험"])
+def test_duplicate_generic_heading_without_stage_is_ambiguous(test_name: str) -> None:
+    pages = [
+        (index, f"2.{index}. 제조단계 {index}\n2.{index}.1. {test_name}\n{index}단계 판정기준")
+        for index in range(1, 8)
+    ]
+    store = PermitPdfStore.from_page_texts(pages, policy=SKY_POLICY)
+    record = ExtractedRecord(test_name=test_name, criteria="적합", result="적합")
+
+    assert store.search(record) == []
+    assert store.has_ambiguous_generic_test(record) is True
+    assert store.has_ambiguous_generic_test(ExtractedRecord(test_name="존재하지 않는 시험")) is False
 
 
 def test_specific_component_b_stage_beats_broad_stage_in_either_input_order() -> None:

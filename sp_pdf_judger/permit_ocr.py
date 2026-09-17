@@ -204,7 +204,7 @@ def _run_tesseract_ocr(image_dir: Path) -> tuple[dict[int, str], list[str]]:
     for image_path in sorted(image_dir.glob("page-*.png"), key=_page_number_from_image):
         page_number = _page_number_from_image(image_path)
         try:
-            pages[page_number] = pytesseract.image_to_string(str(image_path), lang="kor")
+            pages[page_number] = pytesseract.image_to_string(str(image_path), lang="kor+eng")
         except Exception as exc:
             errors.append(f"Tesseract OCR failed for page {page_number}: {exc}")
     return pages, errors

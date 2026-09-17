@@ -1226,7 +1226,7 @@ def ensure_judgement_artifacts(
         )
         before_result = before_pipeline.run(pdf_path)
 
-        if resolved_permit_paths:
+        if resolved_permit_paths or (permit_resolution.policy is not None and permit_resolution.policy.authoritative):
             after_pipeline = DocumentJudgePipeline(
                 permit_pdf_paths=resolved_permit_paths,
                 company=company,

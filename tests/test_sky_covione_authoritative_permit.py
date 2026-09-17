@@ -218,6 +218,60 @@ def test_bridge_resolves_once_and_reuses_one_resolution_for_before_and_after(mon
     assert artifacts["permit_resolution_errors"] == ["catalog diagnostic"]
 
 
+@pytest.mark.parametrize("problem", ["missing", "sha256 mismatch"])
+def test_bridge_runs_after_phase_for_invalid_target_catalog(monkeypatch, tmp_path, problem):
+    pdf_path = tmp_path / "source.pdf"
+    pdf_path.write_bytes(b"source")
+    resolution = ResolvedPermit(AUTHORITATIVE_POLICY, (), f"invalid-{problem}", (problem,), False)
+    pipeline_calls = []
+
+    class Pipeline:
+        def __init__(self, **kwargs):
+            pipeline_calls.append(kwargs)
+
+        def run(self, _pdf_path, **_kwargs):
+            return SimpleNamespace(extracted_records=[], metadata={})
+
+    monkeypatch.setattr(judgement_bridge, "resolve_permits", lambda *_args: resolution)
+    monkeypatch.setattr(judgement_bridge, "DocumentJudgePipeline", Pipeline)
+    monkeypatch.setattr(judgement_bridge, "_write_summary_csv_from_result", lambda *_args: None)
+    monkeypatch.setattr(judgement_bridge, "_attach_rule_regression_log", lambda artifacts: artifacts)
+    monkeypatch.setattr(judgement_bridge, "_remember_judgement_artifacts", lambda _artifacts: None)
+
+    artifacts = judgement_bridge.ensure_judgement_artifacts(
+        pdf_path=pdf_path, permit_paths=[], original_csv_dir=None,
+        company="SK bioscience", product="SKYCovione",
+    )
+
+    assert len(pipeline_calls) == 2
+    assert pipeline_calls[0]["permit_enabled"] is False
+    assert pipeline_calls[1]["permit_resolution"] is resolution
+    assert artifacts["after_result"] is not artifacts["before_result"]
+    assert artifacts["permit_resolution_errors"] == [problem]
+
+
+@pytest.mark.parametrize("problem", ["missing", "sha256 mismatch"])
+def test_direct_pipeline_holds_sp_pass_for_invalid_target_catalog(monkeypatch, tmp_path, problem):
+    pdf_path = tmp_path / "source.pdf"
+    document = fitz.open()
+    document.new_page()
+    document.save(pdf_path)
+    document.close()
+    resolution = ResolvedPermit(AUTHORITATIVE_POLICY, (), f"invalid-{problem}", (problem,), False)
+    monkeypatch.setattr(pipeline_module, "resolve_permits", lambda *_args: resolution)
+    monkeypatch.setattr(pipeline_module, "UcumRagStore", _PipelineRag)
+    monkeypatch.setattr(pipeline_module, "ClovaJudgeClient", _PipelineLlm)
+
+    result = pipeline_module.DocumentJudgePipeline(
+        company="SK bioscience", product="SKYCovione",
+    ).run(pdf_path, extracted_records=[_record()])
+
+    assert result.evaluations[0].final_status == HOLD_LABEL
+    assert result.evaluations[0].source == "permit_pdf_llm_authoritative"
+    assert result.metadata["permit_paths"] == []
+    assert result.metadata["permit_resolution_errors"] == [problem]
+
+
 def test_pipeline_metadata_includes_permit_resolution_and_extraction_diagnostics(monkeypatch, tmp_path):
     """Catch loss of resolution observability while retaining legacy metadata."""
     pdf_path = tmp_path / "source.pdf"
@@ -586,6 +640,49 @@ def test_satisfaction_only_basis_is_not_concrete_even_when_verbatim_in_permit_co
     assert evaluation.final_status == HOLD_LABEL
 
 
+@pytest.mark.parametrize("basis", ["이에 적합하여야 한다", "이에 적합해야 한다", "위 기준에 적합하여야 한다"])
+def test_deictic_compliance_sentence_cannot_authorize_permit_override(basis):
+    store = _store(text=f"3.2.1 유정란접종시험\n{basis}\n")
+    response = JudgeResponse(
+        status=PASS_LABEL, reason="검수합격", permit_match_status="matched",
+        matched_permit_test="유정란접종시험", permit_basis=basis,
+    )
+
+    evaluation = JudgeEngine(EmptyRagStore(), FakePermitLLM(response), store, AUTHORITATIVE_POLICY).judge_record(_record())
+
+    assert evaluation.final_status == HOLD_LABEL
+    assert evaluation.source == "permit_pdf_llm_authoritative"
+
+
+def test_failed_requirement_must_itself_name_a_concrete_permit_condition():
+    store = _store(text="3.2.1 유정란접종시험\n혈구응집반응이 없어야 한다. 이에 적합하여야 한다.")
+    response = JudgeResponse(
+        status=FAIL_LABEL, reason="검수불합격", permit_match_status="matched",
+        matched_permit_test="유정란접종시험", permit_basis="혈구응집반응이 없어야 한다",
+        failed_requirements=["이에 적합하여야 한다"],
+    )
+
+    evaluation = JudgeEngine(EmptyRagStore(), FakePermitLLM(response), store, AUTHORITATIVE_POLICY).judge_record(_record())
+
+    assert evaluation.final_status == HOLD_LABEL
+
+
+def test_explicitly_named_standard_is_concrete_permit_basis():
+    basis = "대한민국약전 무균시험법에 적합하여야 한다"
+    store = _store(text=f"3.2.1 유정란접종시험\n{basis}")
+    response = JudgeResponse(
+        status=FAIL_LABEL, reason="검수불합격", permit_match_status="matched",
+        matched_permit_test="유정란접종시험", permit_basis=basis,
+        failed_requirements=[basis],
+    )
+
+    evaluation = JudgeEngine(EmptyRagStore(), FakePermitLLM(response), store, AUTHORITATIVE_POLICY).judge_record(_record(result="무균시험 양성"))
+
+    assert evaluation.final_status == FAIL_LABEL
+    assert basis in evaluation.reason
+    assert "무균시험 양성" in evaluation.reason
+
+
 @pytest.mark.parametrize(
     "basis",
     ["이상이어야", "이상이어야 한다", "최소이어야", "minimum", "days", "at least", "must be", "없어야 한다", "21"],
@@ -791,6 +888,23 @@ def test_valid_store_without_search_candidate_preserves_primary_without_llm_call
     evaluation = JudgeEngine(EmptyRagStore(), client, store, AUTHORITATIVE_POLICY).judge_record(_record())
 
     assert evaluation.final_status == PASS_LABEL
+    assert client.calls == []
+
+
+@pytest.mark.parametrize("test_name", ["성상", "무균시험"])
+def test_missing_stage_for_duplicate_generic_permit_heading_holds(test_name):
+    text = "\n".join(
+        f"2.{index}. 제조단계 {index}\n2.{index}.1. {test_name}\n판정기준 {index}"
+        for index in range(1, 8)
+    )
+    store = _store(text=text)
+    client = FakePermitLLM(None)
+    record = ExtractedRecord(test_name=test_name, criteria="적합", result="적합")
+
+    evaluation = JudgeEngine(EmptyRagStore(), client, store, AUTHORITATIVE_POLICY).judge_record(record)
+
+    assert evaluation.final_status == HOLD_LABEL
+    assert evaluation.source == "permit_pdf_llm_authoritative"
     assert client.calls == []
 
 

@@ -2366,6 +2366,7 @@ class DocumentJudgePipeline:
             self.llm_client,
             permit_store=self.permit_store,
             permit_policy=active_permit_policy,
+            permit_catalog_valid=self.permit_resolution.catalog_valid if permit_enabled else None,
         )
 
     def _activate_detail_profile(

@@ -46,12 +46,45 @@ def test_product_alias_boundary_does_not_resolve_catalog(tmp_path):
     assert result.paths == ()
 
 
-def test_hash_mismatch_excludes_catalog_file_and_reports_error(tmp_path):
+def test_hash_mismatch_excludes_catalog_file_but_retains_policy(tmp_path):
     package = _catalog(tmp_path, sha256="0" * 64)
     result = resolve_permits([], "SK bioscience", "SKYCovione", package)
-    assert result.policy is None
+    assert result.policy is not None and result.policy.authoritative
+    assert result.catalog_valid is False
     assert result.paths == ()
     assert any("sha256" in error for error in result.errors)
+
+
+def test_missing_catalog_file_excludes_path_but_retains_policy(tmp_path):
+    package = _catalog(tmp_path, sha256="85441a43c7cb9f242a5c20c6648026689c795ad4e8321e215bf68d48fc9a4b1c")
+    (package / "permits" / "documents" / "fixture.pdf").unlink()
+
+    result = resolve_permits([], "SK bioscience", "SKYCovione", package)
+
+    assert result.policy is not None and result.policy.authoritative
+    assert result.catalog_valid is False
+    assert result.paths == ()
+    assert any("missing" in error for error in result.errors)
+
+
+def test_invalid_catalog_file_cannot_reenter_through_explicit_path(tmp_path):
+    package = _catalog(tmp_path, sha256="0" * 64)
+    catalog_file = package / "permits" / "documents" / "fixture.pdf"
+
+    result = resolve_permits([catalog_file], "SK bioscience", "SKYCovione", package)
+
+    assert result.paths == ()
+    assert result.catalog_valid is False
+
+
+def test_catalog_validity_changes_fingerprint(tmp_path):
+    package = _catalog(tmp_path, sha256="0" * 64)
+    invalid = resolve_permits([], "SK bioscience", "SKYCovione", package)
+    catalog_file = package / "permits" / "documents" / "fixture.pdf"
+    catalog_file.write_bytes(b"changed invalid content")
+    changed_invalid = resolve_permits([], "SK bioscience", "SKYCovione", package)
+
+    assert invalid.fingerprint != changed_invalid.fingerprint
 
 
 def test_explicit_paths_are_deduplicated_before_catalog_path(tmp_path):

@@ -19,6 +19,7 @@ class ResolvedPermit:
     paths: tuple[Path, ...]
     fingerprint: str
     errors: tuple[str, ...]
+    catalog_valid: bool | None = None
 
 def _normalize(value: str) -> str:
     return "".join(ch for ch in value.casefold() if ch.isalnum())
@@ -30,8 +31,8 @@ def _sha256(path: Path) -> str:
             digest.update(chunk)
     return digest.hexdigest()
 
-def _fingerprint(entry: dict[str, Any] | None, paths: tuple[Path, ...], hashes: tuple[str, ...]) -> str:
-    payload = {"entry": entry, "paths": [str(path) for path in paths], "hashes": list(hashes)}
+def _fingerprint(entry: dict[str, Any] | None, paths: tuple[Path, ...], hashes: tuple[str, ...], catalog_valid: bool | None, catalog_hash: str | None) -> str:
+    payload = {"entry": entry, "paths": [str(path) for path in paths], "hashes": list(hashes), "catalog_valid": catalog_valid, "catalog_hash": catalog_hash}
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(encoded).hexdigest()
 
@@ -57,17 +58,24 @@ def resolve_permits(explicit_paths: Iterable[Path], company: str | None, product
         except (OSError, json.JSONDecodeError, AttributeError) as exc:
             errors.append(f"catalog error: {exc}")
     resolved = list(explicit)
-    hashes = [_sha256(path) for path in explicit]
+    catalog_valid: bool | None = None
+    catalog_hash: str | None = None
     if entry is not None:
-        catalog_file = root / str(entry["path"])
+        policy = PermitPolicy(str(entry["policy_id"]), bool(entry["authoritative"]), bool(entry["ignore_section_numbers"]), bool(entry["require_llm"]), str(entry["ocr_mode"]))
+        catalog_file = (root / str(entry["path"])).resolve()
+        catalog_valid = False
         if not catalog_file.is_file():
             errors.append(f"catalog file missing: {catalog_file}")
         else:
             actual_hash = _sha256(catalog_file)
+            catalog_hash = actual_hash
             if actual_hash.casefold() != str(entry.get("sha256", "")).casefold():
                 errors.append(f"catalog sha256 mismatch for {catalog_file}")
             else:
+                catalog_valid = True
                 if catalog_file not in seen:
-                    resolved.append(catalog_file); hashes.append(actual_hash)
-                policy = PermitPolicy(str(entry["policy_id"]), bool(entry["authoritative"]), bool(entry["ignore_section_numbers"]), bool(entry["require_llm"]), str(entry["ocr_mode"]))
-    return ResolvedPermit(policy, tuple(resolved), _fingerprint(entry, tuple(resolved), tuple(hashes)), tuple(errors))
+                    resolved.append(catalog_file)
+        if not catalog_valid:
+            resolved = [path for path in resolved if path != catalog_file]
+    hashes = tuple(_sha256(path) for path in resolved)
+    return ResolvedPermit(policy, tuple(resolved), _fingerprint(entry, tuple(resolved), hashes, catalog_valid, catalog_hash), tuple(errors), catalog_valid)

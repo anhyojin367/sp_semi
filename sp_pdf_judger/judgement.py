@@ -734,6 +734,8 @@ def _is_concrete_permit_basis(value: str | None) -> bool:
 
     subject = raw.casefold()
     grammar_patterns = (
+        r"(?:이에|위\s*기준에|해당\s*기준에|그\s*기준에)\s*적합\s*(?:하여야|해야|이어야)?\s*(?:한다|함)?",
+        r"(?:적합|부적합)\s*(?:하여야|해야|이어야)?\s*(?:한다|함)?",
         r"(?:이상|이하|미만|초과|최소|최대)\s*이어야\s*(?:한다)?",
         r"(?:없어야|있어야|확인되어야|이어야)\s*(?:한다)?",
         r"(?:만족|충족|준수)\s*(?:해야|하여야)?\s*(?:한다|함|된다|됩니다)?",
@@ -2471,11 +2473,13 @@ class JudgeEngine:
         llm_client: ClovaJudgeClient | None = None,
         permit_store: PermitPdfStore | None = None,
         permit_policy: PermitPolicy | None = None,
+        permit_catalog_valid: bool | None = None,
     ) -> None:
         self.rag_store = rag_store
         self.llm_client = llm_client
         self.permit_store = permit_store
         self.permit_policy = permit_policy or getattr(permit_store, "policy", None)
+        self.permit_catalog_valid = permit_catalog_valid
 
     @staticmethod
     def _record_context(record: ExtractedRecord) -> str:
@@ -2772,11 +2776,15 @@ class JudgeEngine:
         )
 
         store = self.permit_store
+        if self.permit_catalog_valid is False:
+            return safe_hold
         if store is not None and _permit_has_fatal_extraction_error(getattr(store, "extraction_errors", None)):
             return safe_hold
 
         if not permit_context:
             if store is not None and getattr(store, "extraction_errors", None) and not store.enabled:
+                return safe_hold
+            if store is not None and store.has_ambiguous_generic_test(record):
                 return safe_hold
             # A usable permit store with no semantic search candidate is a
             # genuine not-found case, so retain the primary SP verdict.
@@ -2882,7 +2890,10 @@ class JudgeEngine:
             return safe_hold
 
         failed = getattr(response, "failed_requirements", None) or []
-        if not isinstance(failed, list) or any(not grounded(clean_text(item)) for item in failed):
+        if not isinstance(failed, list) or any(
+            not _is_concrete_permit_basis(clean_text(item)) or not grounded(clean_text(item))
+            for item in failed
+        ):
             return safe_hold
 
         trusted_result = clean_text(record.result)

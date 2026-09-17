@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Iterable
 
@@ -251,6 +251,27 @@ class PermitPdfStore:
                     open_section["parts"].append(body)  # type: ignore[index]
 
         finish_open()
+        if self.policy is not None:
+            expanded: list[PermitChunk] = []
+            for index, chunk in enumerate(chunks):
+                if not chunk.section_number:
+                    expanded.append(chunk)
+                    continue
+                depth = _section_depth(chunk.section_number)
+                descendants: list[PermitChunk] = []
+                for later in chunks[index + 1:]:
+                    if later.section_number and _section_depth(later.section_number) <= depth:
+                        break
+                    if later.section_number:
+                        descendants.append(later)
+                if descendants:
+                    chunk = replace(
+                        chunk,
+                        text=clean_text("\n".join([chunk.text, *(child.text for child in descendants)])),
+                        page_end=descendants[-1].page_end,
+                    )
+                expanded.append(chunk)
+            return expanded
         return chunks
 
     def search(self, record: ExtractedRecord, top_k: int = 5) -> list[PermitChunk]:
@@ -272,6 +293,20 @@ class PermitPdfStore:
                 scored.append((score, index, chunk))
         scored.sort(key=lambda item: (-item[0], item[1]))
         return [chunk for _, _, chunk in scored[:top_k]]
+
+    def has_ambiguous_generic_test(self, record: ExtractedRecord) -> bool:
+        """Signal duplicate generic headings when stage-free search cannot choose one."""
+        if self.policy is None:
+            return False
+        test_name = _compact_identity(record.test_name or "", strip_number=True)
+        generic_names = {_compact_identity(name, strip_number=True) for name in _GENERIC_TEST_NAMES}
+        if test_name not in generic_names:
+            return False
+        matches = sum(
+            _compact_identity(chunk.normalized_test_name or chunk.title, strip_number=True) == test_name
+            for chunk in self.chunks
+        )
+        return matches > 1
 
     def _tokens(self, text: str) -> list[str]:
         value = clean_text(text).casefold().replace("e.coli", "ecoli")

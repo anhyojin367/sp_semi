@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+from types import SimpleNamespace
 
 import fitz
 import pytest
@@ -180,6 +181,22 @@ def test_unusable_windows_text_falls_back_to_usable_tesseract(
         )
     ]
     assert len(tesseract_calls) == 1
+
+
+def test_tesseract_fallback_requests_korean_and_english(monkeypatch, tmp_path: Path) -> None:
+    (tmp_path / "page-2.png").write_bytes(b"image")
+    calls: list[tuple[str, str]] = []
+    fake_tesseract = SimpleNamespace(
+        get_tesseract_version=lambda: "test-version",
+        image_to_string=lambda image, lang: calls.append((image, lang)) or "혼합 text",
+    )
+    monkeypatch.setattr(permit_ocr, "pytesseract", fake_tesseract)
+
+    pages, errors = permit_ocr._run_tesseract_ocr(tmp_path)
+
+    assert errors == []
+    assert pages == {2: "혼합 text"}
+    assert calls == [(str(tmp_path / "page-2.png"), "kor+eng")]
 
 
 @pytest.mark.parametrize(
