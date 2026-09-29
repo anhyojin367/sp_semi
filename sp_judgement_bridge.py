@@ -2,25 +2,32 @@
 from __future__ import annotations
 
 import csv
+import base64
 import hashlib
 import html
 import json
+import os
 import pickle
 import re
 import shutil
 import tempfile
 import unicodedata
+from contextlib import nullcontext
 from datetime import datetime
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
+from sp_review_jobs import review_jobs
+from sp_process_lock import ReviewLockTimeout, artifact_process_lock
 
 import streamlit as st
 import streamlit.components.v1 as components
 
 from sp_pdf_judger.domain_details import resolve_domain_detail_profile
-from sp_pdf_judger.permit_catalog import resolve_permits
+from sp_pdf_judger.permit_catalog import resolve_submission_permits as resolve_permits
 from sp_pdf_judger.pipeline import DocumentJudgePipeline
+from sp_pdf_judger.policy_engine import policy_fingerprint
 from sp_pdf_judger.stage_csv_exporter import (
     _is_albumin_document,
     _write_export_summary_csv,
@@ -48,7 +55,77 @@ JUDGE_COMPONENT_HEIGHT = 10000
 FINAL_JUDGEMENT_VIEWPORT_HEIGHT = 860
 JUDGEMENT_STATUS_DIR = Path(__file__).resolve().parent / ".sp_judgement_status"
 JUDGEMENT_STATUS_INDEX = JUDGEMENT_STATUS_DIR / "status_index.json"
-JUDGEMENT_CACHE_VERSION = "sp-app-direct-bridge-v54-20260916-permit-resolution"
+JUDGEMENT_CACHE_VERSION = "sp-app-direct-bridge-v104-20260929-negative-result"
+_RETRY_REQUEST_SESSION_KEY = "sp_explicit_review_retry"
+
+
+class JudgementCacheError(RuntimeError):
+    """A saved attempt cannot be read; viewing it must not trigger paid work."""
+
+
+class JudgementStatusError(JudgementCacheError):
+    """Do not overwrite unreadable document history or repeat the judgement."""
+
+
+def _read_judgement_cache(path: Path) -> dict[str, Any]:
+    try:
+        artifacts = pickle.loads(path.read_bytes())
+        if (not isinstance(artifacts, dict)
+                or artifacts.get("after_result") is None
+                or artifacts.get("cache_version") != JUDGEMENT_CACHE_VERSION):
+            raise ValueError("Invalid saved attempt")
+        # Check metadata here too, before treating the saved attempt as usable.
+        _has_runtime_llm_failure(artifacts)
+        return artifacts
+    except Exception as exc:
+        raise JudgementCacheError(
+            "저장된 판정 결과를 읽을 수 없어 자동 재호출하지 않았습니다. "
+            "문서 목록으로 돌아가 '검수 진행'을 누르면 기존 파일을 보존하고 재시도합니다."
+        ) from exc
+
+
+def _write_judgement_cache(path: Path, artifacts: dict[str, Any]) -> None:
+    """Publish a complete pickle atomically; do not truncate a previous attempt."""
+    pending = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="wb", dir=path.parent,
+                prefix=".judgement-", suffix=".tmp", delete=False) as stream:
+            pending = Path(stream.name)
+            pickle.dump(artifacts, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        pending.replace(path)
+    finally:
+        if pending is not None and pending.exists():
+            pending.unlink()
+
+
+def _policy_evidence_links(result: Any, rule_id: str) -> str:
+    audit = next((row for row in result.metadata.get("policy_audit", []) if row["rule_id"] == rule_id), None)
+    if not audit:
+        return ""
+    permits = [Path(p) for p in result.metadata.get("permit_paths", [])]
+    links, seen = [], set()
+    for evidence in audit.get("evidence", []):
+        page = evidence.get("page")
+        if not isinstance(page, int) or page < 1:
+            continue
+        if evidence.get("source") == "sp":
+            path, label = Path(result.pdf_path), "SP"
+        else:
+            candidates = [p for p in permits if str(p) == evidence.get("file") or p.name == evidence.get("file")]
+            if len(candidates) != 1:
+                continue
+            path, label = candidates[0], "허가서"
+        identity = (str(path.resolve()), page)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        token = base64.urlsafe_b64encode(identity[0].encode()).decode().rstrip("=")
+        links.append(f'<a href="/?view=pdf_viewer&amp;pdf={token}&amp;page={page}" target="_blank" rel="noopener noreferrer">{label} {page}쪽</a>')
+    if not links:
+        return ""
+    return f'<details><summary>근거 원문 ({len(links)})</summary>{" · ".join(links)}</details>'
 
 
 # ============================================================
@@ -65,7 +142,7 @@ def _file_sig(path: Path | None) -> str:
         return "none"
 
     stat = path.stat()
-    return f"{path.name}:{stat.st_size}:{stat.st_mtime_ns}"
+    return f"{path.resolve()}:{stat.st_size}:{stat.st_mtime_ns}"
 
 
 def _artifact_key(
@@ -85,7 +162,7 @@ def _artifact_key(
         f"{_file_sig(pdf_path)}::"
         f"{permit_sig}::"
         f"{csv_sig}::"
-        f"{company.strip()}::{product.strip()}::{detail_fingerprint}::{permit_fingerprint}"
+        f"{company.strip()}::{product.strip()}::{detail_fingerprint}::{permit_fingerprint}::{policy_fingerprint()}"
     )
 
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
@@ -159,6 +236,7 @@ def _render_structural_validation_cards(
         criteria = str(getattr(ev, "criteria", "") or "")
         result_text = str(getattr(ev, "result", "") or "")
         reason = _display_reason_text(getattr(ev, "reason", ""))
+        evidence_links = _policy_evidence_links(result, section_number) if getattr(ev, "source", "") == "md_policy" else ""
 
         cards.append(
             f"""
@@ -173,7 +251,7 @@ def _render_structural_validation_cards(
               <div class="structural-card-body">
                 <div><b>검증 기준</b><span>{html.escape(criteria)}</span></div>
                 <div><b>검증 결과</b><span>{html.escape(result_text)}</span></div>
-                <div><b>판정 이유</b><span>{html.escape(reason)}</span></div>
+                <div><b>판정 이유</b><span>{html.escape(reason)}{evidence_links}</span></div>
               </div>
             </article>
             """
@@ -371,29 +449,70 @@ def _pdf_status_key(path: Path) -> str:
 
 
 def _read_status_index() -> dict[str, Any]:
-    if not JUDGEMENT_STATUS_INDEX.exists():
-        return {"documents": {}}
-
+    # This is the writer's strict read, unlike the inbox's display-only reader.
+    # A damaged file is not an empty history that can safely be overwritten.
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("Duplicate status JSON key")
+            result[key] = value
+        return result
     try:
         with JUDGEMENT_STATUS_INDEX.open("r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception:
+            data = json.load(f, object_pairs_hook=unique_object)
+        if not isinstance(data, dict) or not isinstance(data.get("documents"), dict):
+            raise ValueError("Invalid status index structure")
+        return data
+    except FileNotFoundError:
         return {"documents": {}}
-
-    if not isinstance(data, dict):
-        return {"documents": {}}
-
-    documents = data.get("documents")
-    if not isinstance(documents, dict):
-        data["documents"] = {}
-
-    return data
+    except (OSError, ValueError) as exc:
+        raise JudgementStatusError(
+            "문서함 상태 기록을 읽을 수 없어 기존 파일을 덮어쓰지 않았습니다. "
+            "저장된 판정 결과는 보존됩니다. 상태 기록의 손상 또는 접근 권한을 확인해야 합니다."
+        ) from exc
 
 
 def _write_status_index(data: dict[str, Any]) -> None:
-    _ensure_dir(JUDGEMENT_STATUS_DIR)
-    with JUDGEMENT_STATUS_INDEX.open("w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    """Caller holds the status lock; readers see the old or complete new JSON."""
+    _ensure_dir(JUDGEMENT_STATUS_INDEX.parent)
+    pending = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
+                dir=JUDGEMENT_STATUS_INDEX.parent, prefix=".status-index-", suffix=".tmp", delete=False) as stream:
+            pending = Path(stream.name)
+            json.dump(data, stream, ensure_ascii=False, indent=2)
+            stream.flush()
+            os.fsync(stream.fileno())
+        pending.replace(JUDGEMENT_STATUS_INDEX)
+    finally:
+        if pending is not None and pending.exists():
+            pending.unlink()
+
+
+def _has_runtime_llm_failure(artifacts: dict[str, Any]) -> bool:
+    """Genuine HOLDs are reusable; interrupted/failed API requests are not."""
+    for stage in ("before_result", "after_result"):
+        metadata = getattr(artifacts.get(stage), "metadata", {}) or {}
+        if metadata.get("llm_last_error"):
+            return True
+        if _to_int(metadata.get("llm_call_count")) > _to_int(metadata.get("llm_success_count")):
+            return True
+    return False
+
+
+def forget_failed_judgement_attempt(pdf_path: Path) -> None:
+    """Explicit new review only; viewing a failed attempt must not auto-retry."""
+    target = Path(pdf_path).resolve()
+    review_jobs.forget_failed(str(target), _has_runtime_llm_failure)
+    # This intent is consumed on the UI thread, never from a worker. Bind it to
+    # the selected path/size/mtime identity, not a global retry permission.
+    st.session_state[_RETRY_REQUEST_SESSION_KEY] = (str(target), _file_sig(target))
+    for key, artifact in list(st.session_state.items()):
+        if (str(key).startswith("sp_direct_judgement_artifacts::") and isinstance(artifact, dict)
+                and artifact.get("pdf_path") and Path(artifact["pdf_path"]).resolve() == target
+                and _has_runtime_llm_failure(artifact)):
+            del st.session_state[key]
 
 
 def _remember_judgement_artifacts(artifacts: dict[str, Any]) -> None:
@@ -429,8 +548,6 @@ def _remember_judgement_artifacts(artifacts: dict[str, Any]) -> None:
     except OSError:
         pdf_sig = {}
 
-    data = _read_status_index()
-    docs = data.setdefault("documents", {})
     # 단일 출처 원칙: summary_counts 는 이미 파일로 저장된 summary_after.csv 에서 읽는다.
     # 이렇게 하면 Gmail·시뮬레이션·판정 세 섹션이 모두 같은 파일을 참조한다.
     summary_counts = {}
@@ -444,8 +561,8 @@ def _remember_judgement_artifacts(artifacts: dict[str, Any]) -> None:
             "total": _to_int(_totals.get("total", 0)),
         }
 
-    docs[_pdf_status_key(pdf_path)] = {
-        "status": "completed",
+    entry = {
+        "status": "failed" if _has_runtime_llm_failure(artifacts) else "completed",
         "cache_version": JUDGEMENT_CACHE_VERSION,
         "artifact_key": artifact_key,
         "pdf_path": str(pdf_path),
@@ -458,6 +575,7 @@ def _remember_judgement_artifacts(artifacts: dict[str, Any]) -> None:
         "resolved_permit_paths": [str(path) for path in artifacts.get("resolved_permit_paths", [])],
         "permit_policy_id": artifacts.get("permit_policy_id"),
         "permit_fingerprint": str(artifacts.get("permit_fingerprint") or ""),
+        "rule_fingerprint": str(artifacts.get("rule_fingerprint") or ""),
         "permit_resolution_errors": list(artifacts.get("permit_resolution_errors", []) or []),
         "permit_extraction_diagnostics": list(artifacts.get("permit_extraction_diagnostics", []) or []),
         "company": str(artifacts.get("company") or ""),
@@ -465,7 +583,18 @@ def _remember_judgement_artifacts(artifacts: dict[str, Any]) -> None:
         "detail_fingerprint": str(artifacts.get("detail_fingerprint") or ""),
         "detail_sources": list(artifacts.get("detail_sources", []) or []),
     }
-    _write_status_index(data)
+    # Distinct artifact locks do not protect this shared read/modify/write.
+    # Keep the global section short: no PDF, provider call, or CSV generation.
+    try:
+        with artifact_process_lock(JUDGEMENT_STATUS_DIR / ".status-index.lock", timeout=30.0):
+            data = _read_status_index()
+            data["documents"][_pdf_status_key(pdf_path)] = entry
+            _write_status_index(data)
+    except ReviewLockTimeout as exc:
+        raise JudgementStatusError(
+            "문서함 상태 저장 잠금을 기다리는 시간이 초과되어 기록을 덮어쓰지 않았습니다. "
+            "저장된 판정 결과는 보존됩니다. 다른 작업이 끝난 뒤 다시 열어주세요."
+        ) from exc
 
 
 # ============================================================
@@ -479,7 +608,8 @@ def _write_summary_csv_from_result(result: Any, output_path: Path) -> Path:
     컬럼:
     제조명, 검수합격, 검수불합격, 검수보류, 총 계
     """
-    if _is_albumin_document(result):
+    has_md_policies = bool(getattr(result, "metadata", {}).get("rule_fingerprint"))
+    if _is_albumin_document(result) and not has_md_policies:
         try:
             export_dir = _ensure_dir(output_path.parent / f"{output_path.stem}_stage_summary_source")
             export_results = export_stage_csvs(result=result, output_dir=export_dir)
@@ -532,6 +662,8 @@ def _write_summary_csv_from_result(result: Any, output_path: Path) -> Path:
         merged[name]["총 계"] += int(row["총 계"])
 
     final_rows = list(merged.values())
+    if has_md_policies:
+        final_rows = _include_document_summary_counts(result, final_rows)
 
     total_pass = sum(int(row["검수합격"]) for row in final_rows)
     total_fail = sum(int(row["검수불합격"]) for row in final_rows)
@@ -559,6 +691,18 @@ def _write_summary_csv_from_result(result: Any, output_path: Path) -> Path:
         writer.writerows(final_rows)
 
     return output_path
+
+
+def _include_document_summary_counts(result, rows):
+    """Keep stage rows, but never drop MD or unassigned tests from overall totals."""
+    wanted = {"검수합격": result.summary.passed, "검수불합격": result.summary.failed,
+              "검수보류": result.summary.held, "총 계": result.summary.total}
+    remainder = {key: value - sum(int(row[key]) for row in rows) for key, value in wanted.items()}
+    if any(value < 0 for value in remainder.values()):
+        raise ValueError("제조단계 집계가 전체 판정 수를 초과합니다. 중복 집계를 확인하십시오.")
+    if remainder["총 계"] != sum(remainder[key] for key in ("검수합격", "검수불합격", "검수보류")):
+        raise ValueError("전체 판정 집계가 일치하지 않습니다.")
+    return [*rows, *([{"제조명": "문서 공통·기타 검증", **remainder}] if remainder["총 계"] else [])]
 
 
 def _read_summary_csv(path: Path | None) -> list[dict[str, str]]:
@@ -1113,6 +1257,25 @@ def _attach_rule_regression_log(artifacts: dict[str, Any]) -> dict[str, Any]:
     return artifacts
 
 
+def get_judgement_job(*, pdf_path, permit_paths, original_csv_dir, company="", product="", _prepared=None):
+    """Start once per full input identity, without blocking the Streamlit script."""
+    if _prepared is None:
+        details = resolve_domain_detail_profile(company, product)
+        permits = resolve_permits(permit_paths, company, product)
+        key = _artifact_key(Path(pdf_path), list(permits.paths), original_csv_dir,
+                            company, product, details.fingerprint, permits.fingerprint)
+        _prepared = (details, permits, key)
+    key = _prepared[2]
+    target = Path(pdf_path).resolve()
+    retry_request = st.session_state.pop(_RETRY_REQUEST_SESSION_KEY, None)
+    retry_failed = retry_request == (str(target), _file_sig(target))
+    return review_jobs.start(key, str(Path(pdf_path).resolve()), lambda progress:
+        ensure_judgement_artifacts(pdf_path=pdf_path, permit_paths=permit_paths,
+            original_csv_dir=original_csv_dir, company=company, product=product,
+            _background=True, _progress=progress, _prepared=_prepared,
+            _retry_failed=retry_failed))
+
+
 def ensure_judgement_artifacts(
     *,
     pdf_path: Path,
@@ -1120,6 +1283,10 @@ def ensure_judgement_artifacts(
     original_csv_dir: Path | None,
     company: str = "",
     product: str = "",
+    _background: bool = False,
+    _progress=None,
+    _prepared=None,
+    _retry_failed: bool = False,
 ) -> dict[str, Any]:
     """
     실제 sp_pdf_judger를 실행해서 before/after 판정 결과와 summary CSV를 만든다.
@@ -1137,8 +1304,11 @@ def ensure_judgement_artifacts(
     original_csv_dir = Path(original_csv_dir) if original_csv_dir else None
     company = str(company or "").strip()
     product = str(product or "").strip()
-    detail_profile = resolve_domain_detail_profile(company, product)
-    permit_resolution = resolve_permits(permit_paths, company, product)
+    if _prepared is None:
+        detail_profile = resolve_domain_detail_profile(company, product)
+        permit_resolution = resolve_permits(permit_paths, company, product)
+    else:
+        detail_profile, permit_resolution, _ = _prepared
     resolved_permit_paths = list(permit_resolution.paths)
 
     key = _artifact_key(
@@ -1152,71 +1322,148 @@ def ensure_judgement_artifacts(
     )
     session_key = f"sp_direct_judgement_artifacts::{key}"
 
-    if session_key in st.session_state:
-        _attach_rule_regression_log(st.session_state[session_key])
-        _remember_judgement_artifacts(st.session_state[session_key])
+    if not _background and session_key in st.session_state:
+        st.session_state.pop(_RETRY_REQUEST_SESSION_KEY, None)
         return st.session_state[session_key]
 
-    root_dir = _ensure_dir(
+    # A direct final-page visit joins an existing UI job rather than duplicating
+    # its extraction/API calls. Worker threads never read/write session_state.
+    if not _background:
+        job = get_judgement_job(pdf_path=pdf_path, permit_paths=permit_paths,
+            original_csv_dir=original_csv_dir, company=company, product=product,
+            _prepared=(detail_profile, permit_resolution, key))
+        with st.spinner("문서 판정 결과를 준비하고 있습니다..."):
+            artifacts = job.future.result()
+        st.session_state[session_key] = artifacts
+        st.session_state["latest_judgement_artifact_key"] = key
+        st.session_state["latest_judgement_pdf_path"] = str(pdf_path)
+        return artifacts
+
+    progress = _progress or (lambda message: None)
+    progress("저장된 판정 및 입력 문서 확인")
+
+    root_dir = (
         Path(tempfile.gettempdir())
         / "sp_app_direct_judgement"
         / key
     )
+    # This encloses both the cache recheck and every artifact write. Other
+    # server processes use the same stable lockfile outside the archive tree.
+    with artifact_process_lock(root_dir.parent / ".locks" / f"{key}.lock",
+            on_wait=lambda: progress("다른 프로세스의 동일 문서 판정 완료 대기")) as waited:
+        if key != _artifact_key(pdf_path, resolved_permit_paths, original_csv_dir,
+                company, product, detail_profile.fingerprint, permit_resolution.fingerprint):
+            raise JudgementCacheError(
+                "대기 중 입력 문서 또는 판정 규칙이 변경되어 이전 결과를 적용하지 않았습니다. "
+                "문서 목록에서 '검수 진행'을 눌러 다시 확인하세요."
+            )
+        if waited and not (root_dir / "judgement_artifacts.pkl").exists():
+            raise JudgementCacheError(
+                "앞선 검수가 결과를 저장하지 못해 대기 요청을 자동 재실행하지 않았습니다. "
+                "문서 목록에서 '검수 진행'을 눌러 다시 시도하세요."
+            )
+        # A click while another owner runs joins that attempt, including its
+        # failure. It must not queue a second paid retry after the owner exits.
+        return _ensure_disk_artifacts(key=key, root_dir=root_dir, pdf_path=pdf_path,
+            resolved_permit_paths=resolved_permit_paths, original_csv_dir=original_csv_dir,
+            company=company, product=product, detail_profile=detail_profile,
+            permit_resolution=permit_resolution, progress=progress,
+            _retry_failed=_retry_failed and not waited)
+
+
+def _record_judgement_attempt(root_dir: Path, key: str, pdf_path: Path) -> None:
+    """Durable start evidence, not a resumable result. Caller holds the OS lock.
+
+    Even a truncated record blocks implicit retry when the final cache is absent.
+    A previous record is overwritten only after its workspace has been archived.
+    """
+    with (root_dir / "attempt_started.json").open("w", encoding="utf-8") as stream:
+        json.dump({"artifact_key": key, "cache_version": JUDGEMENT_CACHE_VERSION,
+            "pdf_path": str(pdf_path.resolve()), "pdf_signature": _file_sig(pdf_path),
+            "started_at": datetime.now().isoformat(timespec="seconds")}, stream, ensure_ascii=False)
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+def _ensure_disk_artifacts(*, key, root_dir, pdf_path, resolved_permit_paths,
+        original_csv_dir, company, product, detail_profile, permit_resolution,
+        progress, _retry_failed):
+    """Caller must hold the artifact OS lock through publication/status writes."""
+    _ensure_dir(root_dir)
+    result_cache_path = root_dir / "judgement_artifacts.pkl"
+    if not result_cache_path.exists() and any(root_dir.iterdir()):
+        # Includes pre-marker legacy workspaces and unreadable/partial records.
+        # Never infer reusable stage results from CSVs or a folder's existence.
+        if not _retry_failed:
+            raise JudgementCacheError(
+                "앞선 검수가 최종 결과를 저장하지 못해 자동 재실행하지 않았습니다. "
+                "중단 자료는 보존됩니다. 문서 목록에서 '검수 진행'을 누르면 "
+                "기존 자료를 별도 보관하고 처음부터 재시도합니다."
+            )
+        # Same-parent rename preserves every old file and prevents stale CSVs
+        # from leaking into the new attempt. OS lockfiles live outside root_dir.
+        archive_dir = root_dir.with_name(f"{root_dir.name}.interrupted-{uuid4().hex}")
+        root_dir.rename(archive_dir)
+        _ensure_dir(root_dir)
 
     before_stage_dir = _ensure_dir(root_dir / "before_stage_csv")
     after_stage_dir = _ensure_dir(root_dir / "after_stage_csv")
 
     summary_before_path = root_dir / "summary_before.csv"
     summary_after_path = root_dir / "summary_after.csv"
-    result_cache_path = root_dir / "judgement_artifacts.pkl"
 
     if result_cache_path.exists():
         try:
-            artifacts = pickle.loads(result_cache_path.read_bytes())
-            if (
-                    isinstance(artifacts, dict)
-                    and artifacts.get("after_result") is not None
-                    and artifacts.get("cache_version") == JUDGEMENT_CACHE_VERSION
-                ):
-                artifacts["root_dir"] = root_dir
-                artifacts["summary_before_path"] = summary_before_path
-                artifacts["summary_after_path"] = summary_after_path
-                artifacts["before_stage_dir"] = before_stage_dir
-                artifacts["after_stage_dir"] = after_stage_dir
-                artifacts["pdf_path"] = pdf_path
-                artifacts["permit_paths"] = resolved_permit_paths
-                artifacts["resolved_permit_paths"] = resolved_permit_paths
-                artifacts["permit_policy_id"] = (
-                    permit_resolution.policy.policy_id
-                    if permit_resolution.policy is not None
-                    else None
+            artifacts = _read_judgement_cache(result_cache_path)
+        except JudgementCacheError:
+            if not _retry_failed:
+                raise
+            artifacts = None
+
+        if artifacts is not None and (not _retry_failed or not _has_runtime_llm_failure(artifacts)):
+            # Failed API attempts are reviewable history, never completed
+            # reviews. _remember_judgement_artifacts keeps their failed status.
+            artifacts["root_dir"] = root_dir
+            artifacts["summary_before_path"] = summary_before_path
+            artifacts["summary_after_path"] = summary_after_path
+            artifacts["before_stage_dir"] = before_stage_dir
+            artifacts["after_stage_dir"] = after_stage_dir
+            artifacts["pdf_path"] = pdf_path
+            artifacts["permit_paths"] = resolved_permit_paths
+            artifacts["resolved_permit_paths"] = resolved_permit_paths
+            artifacts["permit_policy_id"] = (
+                permit_resolution.policy.policy_id
+                if permit_resolution.policy is not None
+                else None
+            )
+            artifacts["permit_fingerprint"] = permit_resolution.fingerprint
+            artifacts["permit_resolution_errors"] = list(permit_resolution.errors)
+            artifacts["permit_extraction_diagnostics"] = list(
+                getattr(artifacts.get("after_result"), "metadata", {}).get(
+                    "permit_extraction_diagnostics", []
                 )
-                artifacts["permit_fingerprint"] = permit_resolution.fingerprint
-                artifacts["permit_resolution_errors"] = list(permit_resolution.errors)
-                artifacts["permit_extraction_diagnostics"] = list(
-                    getattr(artifacts.get("after_result"), "metadata", {}).get(
-                        "permit_extraction_diagnostics", []
-                    )
+            )
+            if original_csv_dir and original_csv_dir.exists():
+                artifacts["runtime_csv_dir"] = _prepare_runtime_simulation_csv_dir(
+                    original_csv_dir=original_csv_dir,
+                    root_dir=root_dir,
+                    summary_before_path=summary_before_path,
+                    summary_after_path=summary_after_path,
                 )
-                if original_csv_dir and original_csv_dir.exists():
-                    artifacts["runtime_csv_dir"] = _prepare_runtime_simulation_csv_dir(
-                        original_csv_dir=original_csv_dir,
-                        root_dir=root_dir,
-                        summary_before_path=summary_before_path,
-                        summary_after_path=summary_after_path,
-                    )
-                st.session_state[session_key] = artifacts
-                st.session_state["latest_judgement_artifact_key"] = key
-                st.session_state["latest_judgement_pdf_path"] = str(pdf_path)
+            if not artifacts.get("rule_regression_run_id"):
                 _attach_rule_regression_log(artifacts)
-                _remember_judgement_artifacts(artifacts)
-                return artifacts
-        except Exception:
-            pass
+            _remember_judgement_artifacts(artifacts)
+            return artifacts
 
-    spinner_text = "문서 기준과 참고 근거를 대조해 판정 데이터를 생성하고 있습니다..."
+        # Preserve all CSVs and the original pickle before an explicit retry.
+        # A sibling folder avoids recursively copying older attempts. If this
+        # copy fails, stop before starting any new extraction or paid request.
+        archive_dir = root_dir.with_name(f"{root_dir.name}.failed-{uuid4().hex}")
+        shutil.copytree(root_dir, archive_dir)
 
-    with st.spinner(spinner_text):
+    _record_judgement_attempt(root_dir, key, pdf_path)
+    with nullcontext():
+        progress("SP 문서 추출 및 문서 기준 판정 준비")
         before_pipeline = DocumentJudgePipeline(
             permit_pdf_paths=[],
             company=company,
@@ -1224,9 +1471,10 @@ def ensure_judgement_artifacts(
             permit_resolution=permit_resolution,
             permit_enabled=False,
         )
-        before_result = before_pipeline.run(pdf_path)
+        before_result = before_pipeline.run(pdf_path, progress_callback=lambda message: progress("SP: " + message))
 
         if resolved_permit_paths or (permit_resolution.policy is not None and permit_resolution.policy.authoritative):
+            progress("허가서 원문 및 적용 기준 준비")
             after_pipeline = DocumentJudgePipeline(
                 permit_pdf_paths=resolved_permit_paths,
                 company=company,
@@ -1237,10 +1485,12 @@ def ensure_judgement_artifacts(
                 pdf_path,
                 extracted_records=before_result.extracted_records,
                 static_result=before_result,
+                progress_callback=lambda message: progress("허가서 대조: " + message),
             )
         else:
             after_result = before_result
 
+        progress("판정 완료 · 요약 및 근거 파일 생성")
         _write_summary_csv_from_result(before_result, summary_before_path)
         _write_summary_csv_from_result(after_result, summary_after_path)
 
@@ -1299,19 +1549,13 @@ def ensure_judgement_artifacts(
         "company": company,
         "product": product,
         "detail_fingerprint": detail_profile.fingerprint,
+        "rule_fingerprint": policy_fingerprint(),
         "detail_sources": detail_profile.sources,
     }
 
     _attach_rule_regression_log(artifacts)
-    st.session_state[session_key] = artifacts
-    st.session_state["latest_judgement_artifact_key"] = key
-    st.session_state["latest_judgement_pdf_path"] = str(pdf_path)
+    _write_judgement_cache(result_cache_path, artifacts)
     _remember_judgement_artifacts(artifacts)
-
-    try:
-        result_cache_path.write_bytes(pickle.dumps(artifacts))
-    except Exception:
-        pass
 
     return artifacts
 
@@ -1892,11 +2136,47 @@ def _clear_query_params() -> None:
             pass
 
 
+def _return_to_document_list() -> None:
+    """Navigation must not regenerate an expired judgement before leaving."""
+    gmail_keys = (
+        "gmail_logged_in", "gmail_connected_address", "gmail_confirm_version", "gmail_address",
+        "gmail_app_password", "gmail_subject_keyword", "gmail_since_date", "gmail_confirmed_address",
+        "gmail_confirmed_app_password", "gmail_confirmed_subject_keyword", "gmail_confirmed_since_date",
+        "gmail_confirmed_search",
+    )
+    gmail_state = {key: st.session_state.get(key) for key in gmail_keys}
+    confirmed_address = str(gmail_state.get("gmail_confirmed_address") or gmail_state.get("gmail_connected_address") or gmail_state.get("gmail_address") or "").strip()
+    confirmed_password = str(gmail_state.get("gmail_confirmed_app_password") or gmail_state.get("gmail_app_password") or "").strip()
+    st.session_state["run_sim"] = False
+    st.session_state["last_gmail_sync_at"] = datetime.now().timestamp()
+    st.session_state["last_gmail_sync_error"] = ""
+    st.session_state["last_gmail_background_error"] = ""
+    st.session_state["gmail_settings_open"] = False
+    for key, value in gmail_state.items():
+        if value not in (None, ""):
+            st.session_state[key] = value
+    if confirmed_address and confirmed_password:
+        st.session_state["gmail_logged_in"] = True
+        st.session_state["gmail_connected_address"] = confirmed_address
+        st.session_state["gmail_address"] = confirmed_address
+        st.session_state["gmail_app_password"] = confirmed_password
+        st.session_state["gmail_confirmed_address"] = confirmed_address
+        st.session_state["gmail_confirmed_app_password"] = confirmed_password
+        st.session_state["gmail_confirm_version"] = "manual-gmail-confirm-20260602-v2"
+    _clear_query_params()
+    st.rerun()
+
+
 def render_final_judgement_page(
     *,
     selected_doc: Any,
     original_csv_dir: Path | None,
 ) -> None:
+    # Keep the existing button/position, but handle it before any PDF/API work.
+    if st.button("← 첫 화면으로 돌아가기"):
+        _return_to_document_list()
+        return
+
     if selected_doc is None:
         st.error("최종 판정에 사용할 SP 문서를 찾지 못했습니다.")
         return
@@ -1906,7 +2186,6 @@ def render_final_judgement_page(
     permit_paths = [
         Path(path)
         for path in getattr(selected_doc, "permit_files", ()) or []
-        if Path(path).exists()
     ]
 
     progress_slot = st.empty()
@@ -1920,13 +2199,18 @@ def render_final_judgement_page(
         unsafe_allow_html=True,
     )
 
-    artifacts = ensure_judgement_artifacts(
-        pdf_path=pdf_path,
-        permit_paths=permit_paths,
-        original_csv_dir=Path(original_csv_dir) if original_csv_dir else None,
-        company=str(getattr(selected_doc, "company", "") or ""),
-        product=str(getattr(selected_doc, "product", "") or ""),
-    )
+    try:
+        artifacts = ensure_judgement_artifacts(
+            pdf_path=pdf_path,
+            permit_paths=permit_paths,
+            original_csv_dir=Path(original_csv_dir) if original_csv_dir else None,
+            company=str(getattr(selected_doc, "company", "") or ""),
+            product=str(getattr(selected_doc, "product", "") or ""),
+        )
+    except Exception as exc:
+        progress_slot.empty()
+        st.error(f"판정 생성에 실패했습니다. 이전 결과로 대체하지 않습니다: {exc}")
+        return
     progress_slot.empty()
 
     result = artifacts["after_result"]
@@ -1974,42 +2258,6 @@ def render_final_judgement_page(
 
 
 
-    if st.button("← 첫 화면으로 돌아가기"):
-        gmail_state = {
-            "gmail_logged_in": st.session_state.get("gmail_logged_in", False),
-            "gmail_connected_address": st.session_state.get("gmail_connected_address", ""),
-            "gmail_confirm_version": st.session_state.get("gmail_confirm_version", ""),
-            "gmail_address": st.session_state.get("gmail_address", ""),
-            "gmail_app_password": st.session_state.get("gmail_app_password", ""),
-            "gmail_subject_keyword": st.session_state.get("gmail_subject_keyword", ""),
-            "gmail_since_date": st.session_state.get("gmail_since_date", None),
-            "gmail_confirmed_address": st.session_state.get("gmail_confirmed_address", ""),
-            "gmail_confirmed_app_password": st.session_state.get("gmail_confirmed_app_password", ""),
-            "gmail_confirmed_subject_keyword": st.session_state.get("gmail_confirmed_subject_keyword", ""),
-            "gmail_confirmed_since_date": st.session_state.get("gmail_confirmed_since_date", None),
-            "gmail_confirmed_search": st.session_state.get("gmail_confirmed_search", ""),
-        }
-        confirmed_address = str(gmail_state.get("gmail_confirmed_address") or gmail_state.get("gmail_connected_address") or gmail_state.get("gmail_address") or "").strip()
-        confirmed_password = str(gmail_state.get("gmail_confirmed_app_password") or gmail_state.get("gmail_app_password") or "").strip()
-        st.session_state["run_sim"] = False
-        st.session_state["last_gmail_sync_at"] = datetime.now().timestamp()
-        st.session_state["last_gmail_sync_error"] = ""
-        st.session_state["last_gmail_background_error"] = ""
-        st.session_state["gmail_settings_open"] = False
-        for key, value in gmail_state.items():
-            if value not in (None, ""):
-                st.session_state[key] = value
-        if confirmed_address and confirmed_password:
-            st.session_state["gmail_logged_in"] = True
-            st.session_state["gmail_connected_address"] = confirmed_address
-            st.session_state["gmail_address"] = confirmed_address
-            st.session_state["gmail_app_password"] = confirmed_password
-            st.session_state["gmail_confirmed_address"] = confirmed_address
-            st.session_state["gmail_confirmed_app_password"] = confirmed_password
-            st.session_state["gmail_confirm_version"] = "manual-gmail-confirm-20260602-v2"
-        _clear_query_params()
-        st.rerun()
-
     doc_company = str(getattr(selected_doc, "company", "") or "제출 문서")
     doc_product = str(getattr(selected_doc, "product", "") or "제품 정보 없음")
     doc_version = str(getattr(selected_doc, "version", "버전 정보 없음") or "버전 정보 없음")
@@ -2030,7 +2278,7 @@ def render_final_judgement_page(
             comparable_total=_t["total"],
         )
     else:
-        display_summary = summarize_stage_info_cards(result)
+        display_summary = result.summary if result.metadata.get("rule_fingerprint") else summarize_stage_info_cards(result)
     preview_html = """
       <div class="final-page-sheet">
         <div class="final-page-missing">

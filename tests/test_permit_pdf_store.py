@@ -129,6 +129,74 @@ def test_normalize_permit_heading_removes_dotted_number() -> None:
     assert normalize_permit_heading("  2.3.1.7. 확인시험  ") == "확인시험"
 
 
+def test_wrapped_decimal_requirement_does_not_replace_stage_heading():
+    store = PermitPdfStore.from_page_texts([(19,
+        "2.2. 완제의약품\n2.2.1. 항원바이알에 대한 시험\n"
+        "2.2.1.2. pH측정시험\npH는 7.5 ~\n8.5 이어야 한다.\n"
+        "2.2.1.3. 무균시험\n균이 없어야 한다.")], policy=SKY_POLICY)
+    assert not any(c.title == "이어야 한다." for c in store.chunks)
+    record = ExtractedRecord(test_name="무균시험", section_title="항원바이알 시험")
+    assert "항원바이알에 대한 시험" in store.search(record)[0].section_path_titles
+    ph = next(c for c in store.chunks if c.title == "pH측정시험")
+    assert "8.5 이어야 한다." in ph.text
+
+
+def test_unicode_filter_size_is_not_a_section_and_keeps_later_acceptance():
+    store = PermitPdfStore.from_page_texts([(21,
+        "2.2. 항원바이알\n2.2.1. 입자크기측정시험\n검체는 희석 없이\n"
+        "0.2 ㎛ 필터로 여과한다. 입자 크기는 27 ~ 88 nm 이어야\n한다.")], policy=SKY_POLICY)
+    test = next(c for c in store.chunks if c.title == "입자크기측정시험")
+    assert "27 ~ 88 nm" in test.text
+    assert not any(c.section_number == "0.2" for c in store.chunks)
+
+
+def test_new_top_level_section_does_not_pollute_preceding_test():
+    store = PermitPdfStore.from_page_texts([
+        (17, "2.4.1. 폴리소르베이트80함량시험\n함량은 0.01 ~ 0.05 % 이어야 한다."),
+        (18, "별첨 문서 표지\n1. 정의\n다음 별첨의 정의\n2. 시험\n2.1. 최종원액\n2.1.1. 무균시험\n균이 없어야 한다."),
+    ], policy=SKY_POLICY)
+    test = next(c for c in store.chunks if c.title == "폴리소르베이트80함량시험")
+    assert "별첨" not in test.text and "정의" not in test.text
+    assert test.page_end == 17
+
+
+def test_product_form_page_is_not_part_of_previous_test_or_parent():
+    store = PermitPdfStore.from_page_texts([
+        (21, "2.2. 항원바이알\n2.2.1. 입자크기측정시험\n입자 크기는 27 ~ 88 nm 이어야 한다."),
+        (22, "문서확인번호 : DEMO\n성상\n투명한 액상\n포장단위\n10바이알/상자\n제품명\n제품A\n59/60"),
+        (23, "문서확인번호 : DEMO\n제조원\n구분\n제조국\n제조원소재지\n수행공정\n전공정"),
+    ], policy=SKY_POLICY)
+    for chunk in store.chunks[:2]:
+        assert chunk.page_end == 21
+        assert "제품A" not in chunk.text and "전공정" not in chunk.text
+    assert any("제품A" in chunk.text and chunk.page_start == 22 for chunk in store.chunks)
+    assert any("전공정" in chunk.text and chunk.page_start == 23 for chunk in store.chunks)
+
+
+def test_lone_appearance_label_does_not_discard_continued_acceptance():
+    store = PermitPdfStore.from_page_texts([
+        (1, "2.1. 시험항목\n시험의 첫 페이지"),
+        (2, "성상\n투명하여야 한다. 제조원에서 정한 포장단위를 사용한다."),
+    ], policy=SKY_POLICY)
+    assert "투명하여야 한다" in store.chunks[0].text
+    assert store.chunks[0].page_end == 2
+
+
+def test_exact_test_and_specific_stage_excludes_other_stages_not_same_stage_conflicts():
+    store = PermitPdfStore.from_page_texts([
+        (1, "2.1. CHO 마스터 세포주\n2.1.1. 세포성장 및 증식확인시험\n마스터 기준"),
+        (2, "2.2. CHO 제조용 세포주\n2.2.1. 세포성장 및 증식확인시험\n제조용 기준"),
+        (3, "2.3. CHO 제조용 세포주\n2.3.1. 세포성장 및 증식확인시험\n충돌하는 제조용 기준"),
+    ], policy=SKY_POLICY)
+    record = ExtractedRecord(test_name="세포성장 및 증식확인시험", section_title="CHO 제조용 세포주에 대한 시험")
+    matches = store.search(record)
+    assert len(matches) == 2
+    assert all("제조용" in chunk.text and "마스터" not in chunk.text for chunk in matches)
+    # Without a specific stage, both stages must remain available; no blind top-1.
+    record.section_title = "재료"
+    assert len(store.search(record)) == 3
+
+
 def test_generic_test_with_no_stage_path_is_not_a_direct_match() -> None:
     store = PermitPdfStore.from_page_texts(
         [(1, "2.3.1.7. 확인시험\n공통 확인 기준")],
@@ -210,6 +278,14 @@ def test_format_context_uses_page_number_fallback_and_real_span() -> None:
 def test_from_page_texts_rejects_unsupported_source_tuple() -> None:
     with pytest.raises(ValueError, match="page_number, text"):
         PermitPdfStore.from_page_texts([(1, "2.1.7. 확인시험", "native")])
+
+
+def test_missing_test_in_known_stage_does_not_borrow_another_stages_threshold():
+    store = PermitPdfStore.from_page_texts([(1,
+        "2.1. Component A 중간체 원액\n2.1.1. 단백질함량시험\n6,200 ㎍/mL 이상\n"
+        "2.2. 나노파티클 원액\n2.2.1. pH측정시험\n7.6 ~ 8.2 이어야 한다.")], policy=SKY_POLICY)
+    assert store.search(ExtractedRecord(section_title="나노파티클 원액에 대한 시험", test_name="단백질함량시험")) == []
+    assert store.search(ExtractedRecord(section_title="Component A 중간체 원액에 대한 시험", test_name="단백질함량시험"))[0].title == "단백질함량시험"
 
 
 def test_injected_extractor_receives_policy_mode_and_aggregates_errors(tmp_path: Path) -> None:

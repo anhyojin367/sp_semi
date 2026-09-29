@@ -1349,7 +1349,10 @@ def _extract_text_manufacturing_no_occurrences(
         if re.search(r"(?:제조번호|제\s*조\s*번호)", line)
     ]
     for idx in code_line_indexes:
-        window = "\n".join(lines[max(0, idx - 1) : min(len(lines), idx + 8)])
+        # A referenced input lot must not inherit the next (output) lot's date.
+        # Bind labels only until the next explicit lot label, never its fields.
+        end = next((other for other in code_line_indexes if other > idx), len(lines))
+        window = "\n".join(lines[idx : min(end, idx + 8)])
         manufacturing_no = ""
         direct_match = re.search(
             r"(?:제조번호|제\s*조\s*번호)\s*(?:\||:|：)?\s*([A-Za-z0-9][A-Za-z0-9._/\-－–—]{1,40})",
@@ -4105,7 +4108,7 @@ def render_manufacturing_info_validation_card(
     records_source: Any,
     validation_results: list[ManufacturingInfoValidationResult] | None = None,
 ) -> str:
-    results = validation_results or validate_manufacturing_info_consistency(records_source)
+    results = validate_manufacturing_info_consistency(records_source) if validation_results is None else validation_results
 
     if not results:
         return """

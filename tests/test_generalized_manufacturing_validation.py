@@ -121,6 +121,16 @@ def test_same_manufacturing_no_accepts_equivalent_date_formats() -> None:
     assert all(field.status == "합격" for field in result.fields)
 
 
+def test_input_lot_reference_does_not_inherit_output_lot_manufacturing_date():
+    from sp_pdf_judger.manufacturing_info_validator import collect_manufacturing_no_occurrences
+    source = [{"record_type": "content", "content": (
+        "사용한 세포주 제조번호 | INPUT-001\n"
+        "제조번호 | OUTPUT-001\n제조년월일 | 2026.03.01\n제조량 | 100L") }]
+    values = collect_manufacturing_no_occurrences(source)
+    assert next(item for item in values if item.manufacturing_no == "INPUT-001").manufacturing_date == ""
+    assert next(item for item in values if item.manufacturing_no == "OUTPUT-001").manufacturing_date == "2026.03.01"
+
+
 def test_same_manufacturing_no_rejects_date_and_expiry_mismatches() -> None:
     result = _result_for_stage(
         validate_manufacturing_info_consistency(_same_lot_source(mismatch=True)),

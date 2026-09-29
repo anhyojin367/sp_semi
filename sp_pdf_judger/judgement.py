@@ -730,7 +730,12 @@ def _is_concrete_permit_basis(value: str | None) -> bool:
             "%", "℃", "±", "eu", "day", "일", "개", "이상", "이하", "미만", "초과",
             "최소", "최대", "atleast", "atmost", "minimum", "maximum",
         )
-        return any(signal in compact for signal in numeric_signals)
+        if any(signal in compact for signal in numeric_signals):
+            return True
+        # Digits in assay names (CO1, MRC-5, etc.) do not make a qualitative
+        # requirement numeric. Retain the subject/condition check below.
+        if not re.search(r"되어야|없어야|않아야|이어야|해야|하여야|must|should", raw, re.I):
+            return False
 
     subject = raw.casefold()
     grammar_patterns = (
@@ -2090,7 +2095,8 @@ def deterministic_judge(
 
 
 def _extract_numeric_requirements(criteria: str | None) -> list[str]:
-    text = clean_text(criteria)
+    from .unit_normalizer import normalize_measurement_text
+    text = normalize_measurement_text(criteria)
 
     if not text:
         return []
@@ -2170,7 +2176,8 @@ def _extract_numeric_requirements(criteria: str | None) -> list[str]:
 
 
 def _extract_numeric_results(result: str | None) -> list[str]:
-    text = clean_text(result)
+    from .unit_normalizer import normalize_measurement_text
+    text = normalize_measurement_text(result)
 
     if not text:
         return []
@@ -2480,12 +2487,15 @@ class JudgeEngine:
         self.permit_store = permit_store
         self.permit_policy = permit_policy or getattr(permit_store, "policy", None)
         self.permit_catalog_valid = permit_catalog_valid
+        self.comparison_bases: dict[int, list[dict]] = {}
 
     @staticmethod
     def _record_context(record: ExtractedRecord) -> str:
         """Serialize the complete SP record for an authoritative permit call."""
         parts: list[str] = []
         for name, value in vars(record).items():
+            if name == "pdf_name":
+                continue  # File naming is neither a test criterion nor product evidence.
             if value is None or value == "" or value == [] or value == {}:
                 continue
             parts.append(f"{name}: {value}")
@@ -2622,6 +2632,11 @@ class JudgeEngine:
         result: str | None,
     ) -> tuple[str | None, str | None, str | None, str | None, str | None, str]:
         """허가서 없이 수행하는 1차 규칙 기반 판정."""
+        from .numeric_safety import minimum_count_veto
+        minimum_veto = minimum_count_veto(criteria or "", result or "")
+        if minimum_veto is not None:
+            return (minimum_veto.status, minimum_veto.reason, "minimum_count_verified",
+                    clean_text(criteria), clean_text(result), "rule_before")
         status, reason = _status_from_text_result(result)
 
         if status is not None:
@@ -2766,6 +2781,8 @@ class JudgeEngine:
         norm_result: str | None,
     ) -> tuple[str | None, str | None, str | None, str | None, str | None, str | None]:
         """Apply the structured permit verdict, safely and only when mapped."""
+        decision_basis = {"source": "unresolved", "reason": "허가서 적용 기준을 확정하지 못했습니다."}
+        self.comparison_bases.setdefault(record.order_idx, []).append(decision_basis)
         safe_hold = (
             HOLD_LABEL,
             "허가서 기준의 시험 매칭 또는 모든 조건을 확정할 수 없어 검수보류로 판단했습니다.",
@@ -2788,6 +2805,7 @@ class JudgeEngine:
                 return safe_hold
             # A usable permit store with no semantic search candidate is a
             # genuine not-found case, so retain the primary SP verdict.
+            decision_basis.update(source="sp", reason="허가서에서 해당 단계·시험 기준을 찾지 못해 SP 기준 적용")
             return None, None, None, None, None, None
 
         client = self.llm_client
@@ -2846,28 +2864,38 @@ class JudgeEngine:
         match_status = clean_text(getattr(response, "permit_match_status", None)).casefold()
         if match_status == "not_found":
             # No mapped permit requirement: the primary SP verdict remains authoritative.
+            decision_basis.update(source="sp", reason="해당 허가 시험 기준이 없어 SP 기준 적용")
             return None, None, None, None, None, None
         if match_status == "ambiguous":
             return (
                 HOLD_LABEL,
-                "허가서 시험 매칭이 불명확하여 검수보류로 판단했습니다.",
+                "허가서 근거 연결을 확정하지 못해 검수보류입니다. " +
+                (" / ".join(getattr(response, "_permit_grounding_errors", [])) or
+                 "시험 매칭 또는 원문 연결 확인이 필요합니다."),
                 "permit_pdf_llm_authoritative",
                 norm_criteria,
                 norm_result or clean_text(record.result),
                 "permit_pdf_llm_authoritative",
             )
-        if match_status != "matched" or response_status not in {PASS_LABEL, FAIL_LABEL}:
+        if match_status not in {"matched", "method_only"} or response_status not in {PASS_LABEL, FAIL_LABEL, HOLD_LABEL}:
             return safe_hold
 
         matched_test = clean_text(getattr(response, "matched_permit_test", None))
         basis = clean_text(getattr(response, "permit_basis", None))
-        context_compact = _compact_semantic(_authoritative_permit_evidence(permit_context))
+        from .permit_llm_protocol import _without_page_furniture
+        context_compact = _compact_semantic(_without_page_furniture(_authoritative_permit_evidence(permit_context)))
 
         generic_test_titles = {
             "허가서", "permit", "pdf", "판정", "후보", "문단", "판정후보문단", "pdf판정후보문단",
             "허가서pdf판정후보문단", "시험", "확인시험", "성상", "무균시험", "기준", "조건", "확인",
         }
         def grounded(value: str, *, test_identity: bool = False) -> bool:
+            if not test_identity:
+                # A verbatim sentence may contain commas, DNA, or unit slashes.
+                # Splitting those into short fragments incorrectly rejects real evidence.
+                whole = _compact_semantic(_without_page_furniture(value))
+                if whole and whole in context_compact:
+                    return True
             raw_parts = re.split(r"\s*(?:>|/|\\|\||≫|→|,|;|:)\s*", value)
             parts: list[str] = []
             for raw_part in raw_parts:
@@ -2875,18 +2903,25 @@ class JudgeEngine:
                 compact = _compact_semantic(part)
                 if not compact or re.fullmatch(r"\d+(?:\.\d+)*", compact):
                     return False
-                if len(compact) < 4 and not re.search(r"\d", compact):
+                if not test_identity and len(compact) < 4 and not re.search(r"\d", compact):
                     return False
                 parts.append(compact)
             if not parts:
                 return False
             if test_identity:
-                distinctive = [part for part in parts if part not in generic_test_titles]
+                distinctive = [part for part in parts if part not in generic_test_titles and len(part) >= 4]
                 if not distinctive:
                     return False
             return all(part in context_compact for part in parts)
 
-        if not grounded(matched_test, test_identity=True) or not _is_concrete_permit_basis(basis) or not grounded(basis):
+        if not grounded(matched_test, test_identity=True) or not grounded(basis):
+            return safe_hold
+        if match_status == "method_only":
+            if re.search(r"생존[율률]|검출되지|이어야|되어야|없어야|않아야|해야|하여야", basis):
+                return safe_hold
+            decision_basis.update(source="sp", reason="허가서는 시험방법만 지정하여 SP 결과 기준 적용")
+            return None, None, None, None, None, None
+        if not _is_concrete_permit_basis(basis):
             return safe_hold
 
         failed = getattr(response, "failed_requirements", None) or []
@@ -2899,6 +2934,28 @@ class JudgeEngine:
         trusted_result = clean_text(record.result)
         llm_norm_criteria = basis
         llm_norm_result = trusted_result
+        from .numeric_safety import permit_numeric_veto
+        acceptance_basis = getattr(response, "permit_acceptance_basis", None)
+        if acceptance_basis is not None and (not acceptance_basis or any(not grounded(text) for text in acceptance_basis)):
+            return safe_hold
+        decision_basis.update(source="permit", criteria="\n".join(acceptance_basis or [basis]),
+                              reason="시험 판정과 동일한 원문 연결 검증을 통과한 허가 적합 조건",
+                              evidence=getattr(response, "_permit_evidence", []))
+        numeric_veto = permit_numeric_veto(basis, trusted_result, acceptance_basis=acceptance_basis)
+        if numeric_veto is not None and response_status != FAIL_LABEL:
+            guard_reason = numeric_veto.reason
+            if numeric_veto.status == HOLD_LABEL:
+                sp_status, *_ = deterministic_judge(record.criteria, trusted_result)
+                if sp_status in (PASS_LABEL, FAIL_LABEL):
+                    sp_label = "충족" if sp_status == PASS_LABEL else "불충족"
+                    guard_reason = (f"SP 기재 기준만 비교하면 {sp_label}입니다 "
+                        f"(기준: {record.criteria}, 결과: {trusted_result}). "
+                        "최종 판정에는 연결된 허가서 기준을 우선 적용합니다. " + guard_reason)
+            return (numeric_veto.status, guard_reason, "permit_pdf_numeric_guard",
+                    basis, trusted_result, "permit_pdf_llm_authoritative")
+        if response_status == HOLD_LABEL:
+            return (HOLD_LABEL, "허가서의 필요한 결과 근거를 추가 확인해야 합니다: " + clean_text(response.reason),
+                    "permit_pdf_llm_authoritative", basis, trusted_result, "permit_pdf_llm_authoritative")
         if response_status == FAIL_LABEL:
             failed_text = " / ".join(clean_text(item) for item in failed if clean_text(item))
             permit_condition = basis if not failed_text else f"{basis} ({failed_text})"
@@ -3189,12 +3246,24 @@ class JudgeEngine:
         )
 
     def judge_record(self, record: ExtractedRecord) -> Evaluation:
+        # A reused engine/record ID must not inherit a previous document result.
+        self.comparison_bases.pop(record.order_idx, None)
         title = (
             clean_text(record.test_name)
             or clean_text(record.section_title)
             or (clean_text(record.raw_text).split("\n")[0] if clean_text(record.raw_text) else "")
             or "항목"
         )
+
+        from .numeric_safety import result_is_requirement
+        if result_is_requirement(record.criteria, record.result):
+            return Evaluation(order_idx=record.order_idx, record_type=record.record_type,
+                section_number=record.section_number, section_title=record.section_title, test_name=title,
+                criteria=record.criteria, result=record.result, method=record.method,
+                test_date=record.test_date, test_period=record.test_period,
+                page_start=record.page_start, page_end=record.page_end, raw_text=record.raw_text or "",
+                final_status=HOLD_LABEL, source="extraction_quality", comparison_completed=False,
+                reason="시험결과란에 실제 관측 결과 대신 시험기준의 요구 문장이 반복되어 원문 및 실제 결과 확인이 필요합니다.")
 
         permit_is_authoritative = bool(self.permit_policy is not None and self.permit_policy.authoritative)
         allow_permit = bool(

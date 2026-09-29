@@ -276,8 +276,8 @@ def test_rendering_receives_only_corrupt_page_numbers(tmp_path: Path, monkeypatc
 
 
 SOURCE_PERMIT_PDF = Path(
-    r"C:\Users\User\Documents\카카오톡 받은 파일\[더미허가문서]스카이코비원멀티주.pdf"
-)
+    __file__
+).resolve().parents[1] / "sp_pdf_judger/permits/documents/sky_covione_multidose.pdf"
 
 
 @pytest.mark.skipif(not SOURCE_PERMIT_PDF.exists(), reason="supplied permit PDF is absent")

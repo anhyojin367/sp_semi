@@ -13,7 +13,7 @@ from pathlib import Path
 import streamlit as st
 import streamlit.components.v1 as components
 
-from sp_flowchart_data import load_simulation_graph, simulation_graph_to_json
+from sp_flowchart_data import load_simulation_graph, simulation_graph_to_json, simulation_structure_notice
 from sp_sim2_viewer import build_simulation_html
 
 st.set_page_config(page_title="검수 시뮬레이션 미리보기", layout="wide", initial_sidebar_state="collapsed")
@@ -51,13 +51,21 @@ def main() -> None:
     csv_dir = dirs[choice]
     pdf_path = _match_pdf(labels[choice])
     if pdf_path:
-        st.caption(f"실제 제조 요약도 추출: {pdf_path.name}")
-    graph, after = load_simulation_graph(csv_dir, pdf_path)
+        st.caption(f"제조 요약도 추출 대상: {pdf_path.name}")
+    try:
+        graph, after = load_simulation_graph(csv_dir, pdf_path)
+    except Exception as exc:
+        st.error(f"제조요약도 데이터를 읽을 수 없습니다: {exc}")
+        return
     if not graph.nodes:
         st.warning(f"{csv_dir.name} 에서 제조 단계를 찾을 수 없습니다.")
         return
 
-    html = build_simulation_html(simulation_graph_to_json(graph, after), graph.product_name or labels[choice])
+    graph_json = simulation_graph_to_json(graph, after)
+    notice = simulation_structure_notice(graph_json)
+    if notice:
+        st.warning(notice)
+    html = build_simulation_html(graph_json, graph.product_name or labels[choice])
     components.html(html, height=900, scrolling=False)
 
 

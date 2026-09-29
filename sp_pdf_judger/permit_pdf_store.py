@@ -1,21 +1,60 @@
 from __future__ import annotations
 
+import hashlib
 import re
+import unicodedata
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Iterable
 
 from .permit_catalog import PermitPolicy
 from .permit_ocr import PermitPageText, extract_permit_page_texts
+from .permit_source_ownership import PermitSourceDocument, PermitSourceSpan, make_span, node_id
 from .schemas import ExtractedRecord
 from .utils import clean_text
 
 
-_HEADING_RE = re.compile(r"(?m)^\s*(?P<section>\d+(?:\.\d+)+(?:\.)?)\s+(?P<title>[^\n]+?)\s*$")
+_HEADING_RE = re.compile(r"(?m)^\s*(?P<section>\d+(?:\.\d+)+(?:\.)?|\d+\.)\s+(?P<title>[^\n]+?)\s*$")
 _LEADING_SECTION_RE = re.compile(r"^\s*\d+(?:\.\d+)+(?:\.)?\s*")
 _NON_IDENTITY_RE = re.compile(r"[^0-9a-zA-Z가-힣]+")
 _GENERIC_TEST_NAMES = {"확인시험", "성상", "무균시험", "시험"}
 _GENERIC_STAGE_TOKENS = {"시험", "기준", "대한", "및", "test"}
+
+
+def _is_product_metadata_page(text: str) -> bool:
+    """Recognize independent permit form pages, not a test's continuation.
+
+    Require multiple standalone form labels. A lone '성상' or a word inside a
+    test sentence must never cut off the following acceptance conditions.
+    The complete page is retained as a separate source chunk.
+    """
+    lines = [re.sub(r"\s+", "", line) for line in text.splitlines() if line.strip()]
+    lines = [line for line in lines if not re.fullmatch(r"문서확인번호:.*|-\d+-|\d+/\d+", line)]
+    if not lines:
+        return False
+    fields = {"성상", "포장단위", "제품명", "제조원", "제조국", "제조원소재지", "수행공정"}
+    return lines[0] in fields and len(fields.intersection(lines)) >= 2
+
+
+def _specific_stage_identity(text: str) -> str:
+    value = _compact_identity(text, strip_number=True)
+    value = re.sub(r"(?:에대한시험|대한시험|시험)$", "", value)
+    if value in {"", "재료", "원액", "시험기준", "제조방법", "완제의약품", "세포은행"}:
+        return ""
+    return value if len(value) >= 4 else ""
+
+
+def _is_real_heading(match: re.Match) -> bool:
+    title = unicodedata.normalize("NFKC", match.group("title")).strip()
+    if any(int(part) == 0 for part in match.group("section").rstrip(".").split(".")):
+        return False
+    # A line-wrapped decimal such as "8.5 이어야 한다." is not section 8.5.
+    # Treating it as a heading destroys all subsequent manufacturing-stage paths.
+    if re.search(r"이어야|되어야|않아야|하여야|해야|한다\.?$", title):
+        return False
+    if re.match(r"(?:[xX×]\s*10|[%℃~±]|(?:mL|mg|ng|μg|µg|μm|mm|nm|cm|mM|cells|mOsm)(?:/|\b))", title):
+        return False
+    return True
 
 
 def normalize_permit_heading(text: str) -> str:
@@ -94,6 +133,14 @@ class PermitChunk:
     section_path_titles: tuple[str, ...] = ()
     normalized_test_name: str = ""
     normalized_stage_path: str = ""
+    # Additive provenance: .text retains legacy descendant-expanded retrieval.
+    owned_spans: tuple[PermitSourceSpan, ...] = ()
+    evidence_id: str = ""
+    parent_evidence_id: str = ""
+
+    @property
+    def owned_text(self) -> str:
+        return clean_text("\n".join(span.text for span in self.owned_spans))
 
 
 class PermitPdfStore:
@@ -110,6 +157,8 @@ class PermitPdfStore:
         self.page_text_extractor = page_text_extractor
         self.chunks: list[PermitChunk] = []
         self.extraction_errors: list[str] = []
+        self.search_aliases: dict[str, set[str]] = {}
+        self.source_documents: list[PermitSourceDocument] = []
         for path in self.permit_pdf_paths:
             if path.exists() and path.suffix.lower() == ".pdf":
                 self.chunks.extend(self._load_pdf(path))
@@ -140,7 +189,8 @@ class PermitPdfStore:
             self.extraction_errors.append(f"Could not extract permit {pdf_path.name}: {exc}")
             return []
         self.extraction_errors.extend(errors)
-        return self._parse_page_texts(pages, pdf_path.name)
+        return self._parse_page_texts(pages, pdf_path.name,
+                                      pdf_sha256=hashlib.sha256(pdf_path.read_bytes()).hexdigest())
 
     def _split_page_into_sections(self, source_file: str, page_number: int, text: str) -> list[PermitChunk]:
         """Compatibility helper for callers that still split one physical page."""
@@ -150,10 +200,43 @@ class PermitPdfStore:
         self,
         pages: Iterable[PermitPageText | tuple[int, str]],
         source_file: str,
+        *,
+        pdf_sha256: str = "",
     ) -> list[PermitChunk]:
+        normalized_pages = []
+        for raw_page in pages:
+            if isinstance(raw_page, PermitPageText):
+                number, value = raw_page.page_number, raw_page.text
+            elif isinstance(raw_page, tuple) and len(raw_page) == 2:
+                number, value = raw_page
+            else:
+                raise ValueError("page texts must contain (page_number, text) tuples")
+            if type(number) is not int or number <= 0 or not isinstance(value, str):
+                raise ValueError("page texts require a positive non-bool int page number and str text")
+            normalized_pages.append((number, clean_text(value)))
+        document = PermitSourceDocument(source_file, tuple(normalized_pages), pdf_sha256)
+        self.source_documents.append(document)
         chunks: list[PermitChunk] = []
         path_stack: list[tuple[int, str]] = []
+        owner_stack: list[tuple[int, str]] = []
         open_section: dict[str, object] | None = None
+
+        def own(page_number, page_text, start, end, kind="body"):
+            if page_text[start:end].strip():
+                return make_span(document, page_number, page_text, start, end, kind)
+            return None
+
+        def standalone(page_number, page_text, start, end, title="허가서 본문"):
+            span = own(page_number, page_text, start, end)
+            if span is not None:
+                chunks.append(PermitChunk(source_file, page_number, "", title, clean_text(span.text),
+                                          page_number, page_number, normalized_test_name=title,
+                                          owned_spans=(span,), evidence_id=node_id(span, "", ())))
+
+        def append_body(page_number, page_text, start, end):
+            span = own(page_number, page_text, start, end)
+            if span is not None:
+                open_section["owned_spans"].append(span)
 
         def finish_open() -> None:
             nonlocal open_section
@@ -173,23 +256,33 @@ class PermitPdfStore:
                         section_path_titles=open_section["path_titles"],  # type: ignore[arg-type,index]
                         normalized_test_name=open_section["normalized_test_name"],  # type: ignore[arg-type,index]
                         normalized_stage_path=open_section["normalized_stage_path"],  # type: ignore[arg-type,index]
+                        owned_spans=tuple(open_section["owned_spans"]),
+                        evidence_id=open_section["evidence_id"],
+                        parent_evidence_id=open_section["parent_evidence_id"],
                     )
                 )
             open_section = None
 
-        def start_section(page_number: int, section_number: str, title: str) -> None:
-            nonlocal open_section, path_stack
+        def start_section(page_number: int, section_number: str, title: str, heading_span) -> None:
+            nonlocal open_section, path_stack, owner_stack
             finish_open()
             depth = _section_depth(section_number)
             path_stack = [entry for entry in path_stack if entry[0] < depth]
             path_stack.append((depth, title))
             path_titles = tuple(item_title for _, item_title in path_stack)
+            owner_stack = [entry for entry in owner_stack if entry[0] < depth]
+            evidence_id = node_id(heading_span, section_number.rstrip("."), path_titles)
+            parent_id = owner_stack[-1][1] if owner_stack else ""
+            owner_stack.append((depth, evidence_id))
             open_section = {
                 "page_start": page_number,
                 "page_end": page_number,
                 "section_number": section_number.rstrip("."),
                 "title": title,
                 "parts": [f"{section_number} {title}"],
+                "owned_spans": [heading_span],
+                "evidence_id": evidence_id,
+                "parent_evidence_id": parent_id,
                 "path_titles": path_titles,
                 "normalized_test_name": normalize_permit_heading(title),
                 "normalized_stage_path": " ".join(
@@ -197,58 +290,52 @@ class PermitPdfStore:
                 ),
             }
 
-        for raw_page in pages:
+        for page_number, text in normalized_pages:
             if self.policy is None and open_section is not None:
                 finish_open()
                 path_stack = []
-            if isinstance(raw_page, PermitPageText):
-                page_number, page_text = raw_page.page_number, raw_page.text
-            else:
-                if not isinstance(raw_page, tuple) or len(raw_page) != 2:
-                    raise ValueError("page texts must contain (page_number, text) tuples")
-                page_number, page_text = raw_page[0], raw_page[1]
-                if (
-                    not isinstance(page_number, int)
-                    or isinstance(page_number, bool)
-                    or page_number <= 0
-                    or not isinstance(page_text, str)
-                ):
-                    raise ValueError(
-                        "page texts require a positive non-bool int page number and str text"
-                    )
-            text = clean_text(page_text or "")
+                owner_stack = []
             if not text:
                 continue
-            matches = list(_HEADING_RE.finditer(text))
+            if _is_product_metadata_page(text):
+                finish_open()
+                path_stack = []
+                owner_stack = []
+                standalone(page_number, text, 0, len(text), "허가서 제품정보")
+                continue
+            matches = [match for match in _HEADING_RE.finditer(text) if _is_real_heading(match)]
             if not matches:
                 if open_section is None:
-                    chunks.append(
-                        PermitChunk(source_file, page_number, "", "허가서 본문", text, page_number, page_number,
-                                    normalized_test_name="허가서 본문")
-                    )
+                    standalone(page_number, text, 0, len(text))
                 else:
                     open_section["parts"].append(text)  # type: ignore[index]
                     open_section["page_end"] = page_number
+                    append_body(page_number, text, 0, len(text))
                 continue
 
             prefix = clean_text(text[: matches[0].start()])
+            if _section_depth(matches[0].group("section")) == 1:
+                # A new top-level document section ends the preceding test.
+                # Its cover/header must not be appended as a missing test clause.
+                finish_open()
             if prefix:
                 if open_section is not None:
                     open_section["parts"].append(prefix)  # type: ignore[index]
                     open_section["page_end"] = page_number
+                    append_body(page_number, text, 0, matches[0].start())
                 else:
-                    chunks.append(
-                        PermitChunk(source_file, page_number, "", "허가서 본문", prefix, page_number, page_number,
-                                    normalized_test_name="허가서 본문")
-                    )
+                    standalone(page_number, text, 0, matches[0].start())
 
             for index, match in enumerate(matches):
                 section_number = clean_text(match.group("section"))
                 title = clean_text(match.group("title"))
-                start_section(page_number, section_number, title)
+                start_section(page_number, section_number, title,
+                              own(page_number, text, match.start(), match.end(), "heading"))
                 body = clean_text(text[match.end(): matches[index + 1].start() if index + 1 < len(matches) else len(text)])
                 if body:
                     open_section["parts"].append(body)  # type: ignore[index]
+                    append_body(page_number, text, match.end(),
+                                matches[index + 1].start() if index + 1 < len(matches) else len(text))
 
         finish_open()
         if self.policy is not None:
@@ -260,6 +347,8 @@ class PermitPdfStore:
                 depth = _section_depth(chunk.section_number)
                 descendants: list[PermitChunk] = []
                 for later in chunks[index + 1:]:
+                    if not later.section_number:
+                        break  # An independent form/cover page ends this hierarchy.
                     if later.section_number and _section_depth(later.section_number) <= depth:
                         break
                     if later.section_number:
@@ -273,6 +362,18 @@ class PermitPdfStore:
                 expanded.append(chunk)
             return expanded
         return chunks
+
+    def configure_search_aliases(self, groups: Iterable[Iterable[str]]) -> None:
+        # Replaced, not appended: an edited/removed MD mapping must not linger.
+        self.search_aliases = {}
+        for group in groups:
+            names = {_compact_identity(value, strip_number=True) for value in group}
+            names.discard("")
+            for name in names:
+                self.search_aliases.setdefault(name, set()).update(names)
+
+    def _same_test_candidate(self, left: str, right: str) -> bool:
+        return bool(left and right and (left == right or right in self.search_aliases.get(left, set())))
 
     def search(self, record: ExtractedRecord, top_k: int = 5) -> list[PermitChunk]:
         if not self.chunks:
@@ -292,6 +393,26 @@ class PermitPdfStore:
             if score > 0:
                 scored.append((score, index, chunk))
         scored.sort(key=lambda item: (-item[0], item[1]))
+        if self.policy is not None:
+            # If the named test AND its specific manufacturing stage match
+            # after formatting normalization or an explicit MD candidate alias,
+            # exclude other stages. Aliases do not decide semantic equivalence.
+            # Keep every same-stage duplicate: conflicting permits stay ambiguous.
+            stage = _specific_stage_identity(record.section_title or "")
+            test = _compact_identity(record.test_name or "", strip_number=True)
+            # An absent test in a known stage is not permission to borrow a
+            # same-named test from another manufacturing stage.
+            stage_known = stage and any(
+                any(_specific_stage_identity(part) == stage for part in chunk.section_path_titles)
+                for chunk in self.chunks)
+            if stage_known:
+                scored = [item for item in scored if
+                          any(_specific_stage_identity(part) == stage for part in item[2].section_path_titles[:-1])]
+            exact = [item for item in scored if stage and
+                     self._same_test_candidate(test, _compact_identity(item[2].normalized_test_name or item[2].title, strip_number=True)) and
+                     any(_specific_stage_identity(part) == stage for part in item[2].section_path_titles[:-1])]
+            if exact:
+                scored = exact
         return [chunk for _, _, chunk in scored[:top_k]]
 
     def has_ambiguous_generic_test(self, record: ExtractedRecord) -> bool:
@@ -347,7 +468,7 @@ class PermitPdfStore:
         chunk_test = _compact_identity(chunk.normalized_test_name or chunk.title, strip_number=True)
         if not record_test or not chunk_test:
             return 0.0
-        if record_test == chunk_test:
+        if self._same_test_candidate(record_test, chunk_test):
             test_score = 100.0
         elif record_test in chunk_test or chunk_test in record_test:
             test_score = 60.0

@@ -4,8 +4,8 @@ from __future__ import annotations
 import csv
 import json
 import re
-from collections import defaultdict
-from dataclasses import asdict, dataclass, field
+from collections import defaultdict, deque
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
 
@@ -30,6 +30,7 @@ class StageNode:
     total_count: int = 0
     layer: int = 0
     lane: int = 0
+    kind: str = "process"
 
 
 @dataclass
@@ -44,6 +45,9 @@ class ManufacturingGraph:
     nodes: list[StageNode] = field(default_factory=list)
     edges: list[FlowEdge] = field(default_factory=list)
     layers: list[list[str]] = field(default_factory=list)
+    structure_provenance: dict[str, str] = field(default_factory=lambda: {
+        "source": "csv_inferred", "reason": "no_pdf",
+    })
 
 
 PHASE_KEYWORDS: list[tuple[str, int]] = [
@@ -79,6 +83,27 @@ def _slugify(name: str) -> str:
 
 def _normalize(name: str) -> str:
     return re.sub(r"[\s._\-/()]+", "", name.strip().lower())
+
+
+def _node_kind(name: str) -> str:
+    # Only explicit exporter buckets are non-process nodes; never guess by substring.
+    norm = _normalize(name)
+    if norm in {_normalize("문서 공통·기타 검증"), _normalize("문서공통")}:
+        return "document_check"
+    if norm == _normalize("단계 미분류 시험"):
+        return "unassigned_check"
+    return "process"
+
+
+def _unique_stage_lookup(items):
+    """A normalized spelling may identify only one stage, not merge its counts."""
+    result = {}
+    for name, value in items:
+        key = _normalize(name)
+        if key in result:
+            raise ValueError("판정 집계 단계명이 중복되어 공정도와 일대일 대응할 수 없습니다.")
+        result[key] = value
+    return result
 
 
 def _detect_phase(label: str) -> int | None:
@@ -119,19 +144,8 @@ def load_from_csv_directory(
     stages: list[tuple[str, int, int, int, int]] = []
 
     if summary_path.exists():
-        with open(summary_path, encoding="utf-8-sig") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                name = row.get("제조명", "").strip()
-                if not name or name in {"전체", "단계 미분류 시험"}:
-                    continue
-                stages.append((
-                    name,
-                    int(row.get("검수합격", 0)),
-                    int(row.get("검수불합격", 0)),
-                    int(row.get("검수보류", 0)),
-                    int(row.get("총 계", 0)),
-                ))
+        stages = [(name, c["pass"], c["fail"], c["hold"], c["total"])
+                  for name, c in _read_summary_counts(summary_path).items()]
 
     nodes: list[StageNode] = []
     used_ids: set[str] = set()
@@ -149,15 +163,14 @@ def load_from_csv_directory(
             fail_count=fc,
             hold_count=hc,
             total_count=tc,
+            kind=_node_kind(name),
         ))
 
     if not nodes:
         for csv_file in sorted(csv_dir.glob("*.csv")):
-            if csv_file.name == "summary.csv":
+            if csv_file.name in {"summary.csv", "summary_after.csv"}:
                 continue
             name = csv_file.stem.replace("_", " ")
-            if name == "단계 미분류 시험":
-                continue
             tests = _load_stage_tests(csv_dir, name)
             slug = _slugify(name)
             if slug in used_ids:
@@ -170,10 +183,12 @@ def load_from_csv_directory(
                 id=slug, label=name, tests=tests,
                 pass_count=pc, fail_count=fc, hold_count=hc,
                 total_count=len(tests),
+                kind=_node_kind(name),
             ))
 
+    _unique_stage_lookup((n.label, n) for n in nodes)
     edges = _infer_edges(nodes)
-    _assign_layers(nodes, edges)
+    _layout_with_supplemental_checks(nodes, edges)
 
     graph = ManufacturingGraph(product_name=product_name, nodes=nodes, edges=edges)
     graph.layers = _build_layer_list(nodes)
@@ -212,6 +227,7 @@ def _parse_test_csv(path: Path) -> list[TestResult]:
 
 
 def _infer_edges(nodes: list[StageNode]) -> list[FlowEdge]:
+    nodes = [n for n in nodes if n.kind == "process"]
     if len(nodes) <= 1:
         return []
 
@@ -272,41 +288,40 @@ def _infer_edges(nodes: list[StageNode]) -> list[FlowEdge]:
     return edges
 
 
-def _assign_layers(nodes: list[StageNode], edges: list[FlowEdge]) -> None:
-    if not nodes:
-        return
-
-    id_to_node = {n.id: n for n in nodes}
-    children: dict[str, list[str]] = defaultdict(list)
-    parents: dict[str, list[str]] = defaultdict(list)
-    for e in edges:
-        children[e.source].append(e.target)
-        parents[e.target].append(e.source)
-
-    roots = [n.id for n in nodes if n.id not in parents]
-    if not roots:
-        roots = [nodes[0].id]
-
-    layers: dict[str, int] = {}
-    visited: set[str] = set()
-    queue = list(roots)
-    for r in roots:
-        layers[r] = 0
-
+def _topological_layers(node_ids, edge_pairs) -> dict:
+    """Longest-path layers for a DAG; never turn a cycle into arbitrary layers."""
+    degree = dict.fromkeys(node_ids, 0)
+    if len(degree) != len(node_ids):
+        raise ValueError("공정 노드 식별자가 중복되었습니다.")
+    children = defaultdict(list)
+    seen = set()
+    for source, target in edge_pairs:
+        if source not in degree or target not in degree:
+            raise ValueError("연결선의 공정 노드를 찾을 수 없습니다.")
+        if (source, target) in seen:
+            raise ValueError("동일한 공정 연결선이 중복되었습니다.")
+        seen.add((source, target))
+        children[source].append(target)
+        degree[target] += 1
+    queue = deque(n for n in node_ids if degree[n] == 0)
+    layers = dict.fromkeys(node_ids, 0)
+    processed = 0
     while queue:
-        nid = queue.pop(0)
-        if nid in visited:
-            continue
-        visited.add(nid)
-        cur_layer = layers.get(nid, 0)
+        nid = queue.popleft()
+        processed += 1
         for child in children.get(nid, []):
-            layers[child] = max(layers.get(child, 0), cur_layer + 1)
-            queue.append(child)
+            layers[child] = max(layers[child], layers[nid] + 1)
+            degree[child] -= 1
+            if degree[child] == 0:
+                queue.append(child)
+    if processed != len(node_ids):
+        raise ValueError("순환·재작업 연결은 현재 시뮬레이션에서 지원하지 않습니다.")
+    return layers
 
-    for n in nodes:
-        if n.id not in layers:
-            layers[n.id] = max(layers.values(), default=0) + 1
 
+def _assign_layers(nodes: list[StageNode], edges: list[FlowEdge]) -> None:
+    layers = _topological_layers([n.id for n in nodes], [(e.source, e.target) for e in edges])
+    id_to_node = {n.id: n for n in nodes}
     layer_groups: dict[int, list[str]] = defaultdict(list)
     for n in nodes:
         n.layer = layers[n.id]
@@ -326,12 +341,25 @@ def _build_layer_list(nodes: list[StageNode]) -> list[list[str]]:
     return [layer_map.get(i, []) for i in range(max_layer + 1)]
 
 
+def _layout_with_supplemental_checks(nodes: list[StageNode], edges: list[FlowEdge]) -> None:
+    process = [n for n in nodes if n.kind == "process"]
+    _assign_layers(process, edges)
+    # Keep the existing last-column presentation, but add no manufacturing arrows.
+    last_layer = max((n.layer for n in process), default=0)
+    lane = sum(n.layer == last_layer for n in process)
+    for n in nodes:
+        if n.kind != "process":
+            n.layer, n.lane = last_layer, lane
+            lane += 1
+
+
 def graph_to_json(graph: ManufacturingGraph) -> str:
     data = {
         "product_name": graph.product_name,
         "nodes": [asdict(n) for n in graph.nodes],
         "edges": [asdict(e) for e in graph.edges],
         "layers": graph.layers,
+        "structure_provenance": dict(graph.structure_provenance),
     }
     return json.dumps(data, ensure_ascii=False)
 
@@ -348,10 +376,10 @@ def _read_summary_counts(path: Path) -> dict[str, dict[str, int]]:
         return out
 
     def to_int(value):
-        try:
-            return int(str(value).replace(",", "").strip() or "0")
-        except Exception:
-            return 0
+        text = str(value).strip()
+        if not re.fullmatch(r"(?:[0-9]+|[0-9]{1,3}(?:,[0-9]{3})+)", text):
+            raise ValueError("판정 집계 숫자가 올바른 음이 아닌 정수가 아닙니다.")
+        return int(text.replace(",", ""))
 
     total_markers = {"전체", "총계", "합계", "total", "overall"}
     with open(path, encoding="utf-8-sig", newline="") as f:
@@ -360,16 +388,23 @@ def _read_summary_counts(path: Path) -> dict[str, dict[str, int]]:
     for row in rows[1:]:
         if not row or not any(str(cell).strip() for cell in row):
             continue
-        padded = row + ["0"] * 5
-        name = str(padded[0]).strip()
+        name = str(row[0]).strip()
         if not name or name.casefold() in total_markers:
             continue
+        if len(row) < 5:
+            raise ValueError("판정 집계 숫자 열이 누락되었습니다.")
+        if name in out:
+            raise ValueError("판정 집계 단계명이 중복되었습니다.")
         out[name] = {
-            "pass": to_int(padded[1]),
-            "fail": to_int(padded[2]),
-            "hold": to_int(padded[3]),
-            "total": to_int(padded[4]),
+            "pass": to_int(row[1]),
+            "fail": to_int(row[2]),
+            "hold": to_int(row[3]),
+            "total": to_int(row[4]),
         }
+        c = out[name]
+        if c["total"] != c["pass"] + c["fail"] + c["hold"]:
+            raise ValueError("판정 집계의 합격·불합격·보류 합과 총계가 일치하지 않습니다.")
+    _unique_stage_lookup(out.items())
     return out
 
 
@@ -382,11 +417,49 @@ def _locate_summary(csv_dir: Path, name: str) -> Path | None:
     return None
 
 
+class FlowchartExtractionError(RuntimeError):
+    """An unreadable or ambiguous diagram must not look like absent evidence."""
+
+
+def _flowchart_record_data(dd: dict):
+    if not isinstance(dd, dict):
+        raise ValueError("공정도 자료 형식 오류")
+    nodes, edges = dd.get("nodes"), dd.get("edges")
+    if not isinstance(nodes, list) or not isinstance(edges, list):
+        raise ValueError("노드/연결선 목록 형식 오류")
+    id2name, node_names = {}, []
+    for node in nodes:
+        if not isinstance(node, dict):
+            raise ValueError("노드 형식 오류")
+        node_id, name = node.get("node_id"), node.get("name")
+        if (type(node_id) not in (str, int) or not str(node_id).strip()
+                or not isinstance(name, str) or not name.strip()):
+            raise ValueError("노드 식별자/이름 누락")
+        name = name.strip()
+        if node_id in id2name or name in node_names:
+            raise ValueError("노드 식별자/이름 중복")
+        id2name[node_id] = name
+        node_names.append(name)
+    _unique_stage_lookup((name, name) for name in node_names)
+    edge_pairs = []
+    for edge in edges:
+        if not isinstance(edge, dict):
+            raise ValueError("연결선 형식 오류")
+        source, target = edge.get("from"), edge.get("to")
+        if type(source) not in (str, int) or type(target) not in (str, int):
+            raise ValueError("연결선 노드 식별자 형식 오류")
+        if source not in id2name or target not in id2name:
+            raise ValueError("연결선의 노드를 찾을 수 없음")
+        edge_pairs.append((id2name[source], id2name[target]))
+    _topological_layers(node_names, edge_pairs)
+    return (node_names, edge_pairs) if node_names else None
+
+
 def extract_pdf_flowchart(pdf_path: Path):
     """extractor_codex_0517 로 PDF의 실제 제조 요약도(노드/연결)를 추출한다.
 
-    반환: (node_names[순서], edge_pairs[(src_name,tgt_name)]) 또는 None(추출 실패).
-    이름 추론이 아니라 PDF 다이어그램의 실제 구조를 그대로 사용한다.
+    반환: (node_names[순서], edge_pairs[(src_name,tgt_name)]) 또는 None(공정도 미발견).
+    읽기/구조 오류는 별도 예외다. 추출된 연결선이며 원문과의 의미 일치를 보증하지 않는다.
     """
     try:
         import extractor_codex_0517 as ex
@@ -395,24 +468,22 @@ def extract_pdf_flowchart(pdf_path: Path):
         sections = ex.SectionBuilder().run(items)
         blocks = ex.BlockBuilder().run(items, sections)
         records = ex.RecordExtractor().run(blocks)
-    except Exception:
-        return None
+    except Exception as exc:
+        raise FlowchartExtractionError("PDF 제조요약도 추출에 실패했습니다. CSV 추정 구조로 대체하지 않습니다.") from exc
 
-    for r in records:
-        dd = getattr(r, "diagram_data", None)
-        if getattr(r, "record_type", None) == "flowchart" and dd:
-            nodes = dd.get("nodes") or []
-            edges = dd.get("edges") or []
-            id2name = {n.get("node_id"): (n.get("name") or "").strip() for n in nodes}
-            node_names = [(n.get("name") or "").strip() for n in nodes if (n.get("name") or "").strip()]
-            edge_pairs = []
-            for e in edges:
-                s, t = id2name.get(e.get("from")), id2name.get(e.get("to"))
-                if s and t:
-                    edge_pairs.append((s, t))
-            if node_names:
-                return node_names, edge_pairs
-    return None
+    diagrams = [r for r in records if getattr(r, "record_type", None) == "flowchart"]
+    if len(diagrams) > 1:
+        raise FlowchartExtractionError(
+            "PDF 제조요약도가 여러 개여서 연결 관계를 확정할 수 없습니다. "
+            "현재 시뮬레이션은 다중 공정도를 지원하지 않으며, 일부만 선택하거나 임의로 합치지 않습니다.")
+    if not diagrams:
+        return None
+    try:
+        return _flowchart_record_data(getattr(diagrams[0], "diagram_data", None))
+    except Exception as exc:
+        raise FlowchartExtractionError(
+            f"PDF 제조요약도 노드/연결선이 불완전하거나 지원되지 않습니다: {exc} "
+            "CSV 추정 구조로 대체하지 않습니다.") from exc
 
 
 def build_graph_from_flowchart(
@@ -422,13 +493,16 @@ def build_graph_from_flowchart(
     counts: dict[str, dict[str, int]],
 ) -> ManufacturingGraph:
     """PDF에서 추출한 실제 노드/연결 + summary 카운트로 그래프를 만든다."""
-    count_by_norm = {_normalize(k): v for k, v in counts.items()}
+    count_by_norm = _unique_stage_lookup(counts.items())
+    _unique_stage_lookup((name, name) for name in node_names)
+    try:
+        _topological_layers(node_names, edge_pairs)
+    except ValueError as exc:
+        raise FlowchartExtractionError(f"PDF 제조요약도 공정 구조를 표시할 수 없습니다: {exc}") from exc
     used_ids: set[str] = set()
     name_to_id: dict[str, str] = {}
     nodes: list[StageNode] = []
     for name in node_names:
-        if name in name_to_id:
-            continue
         slug = _slugify(name)
         if slug in used_ids:
             slug = f"{slug}_{len(used_ids)}"
@@ -442,39 +516,43 @@ def build_graph_from_flowchart(
             hold_count=int(c.get("hold", 0)),
             total_count=int(c.get("total", 0)),
         ))
-    edges = [FlowEdge(name_to_id[s], name_to_id[t])
-             for s, t in edge_pairs if s in name_to_id and t in name_to_id]
+    edges = [FlowEdge(name_to_id[s], name_to_id[t]) for s, t in edge_pairs]
     _assign_layers(nodes, edges)
     graph = ManufacturingGraph(product_name=product_name, nodes=nodes, edges=edges)
     graph.layers = _build_layer_list(nodes)
+    graph.structure_provenance = {"source": "pdf_extracted", "reason": "selected_pdf"}
     return graph
 
 
-def _has_branch_or_merge(graph: ManufacturingGraph) -> bool:
-    parents: dict[str, int] = defaultdict(int)
-    children: dict[str, int] = defaultdict(int)
-    for edge in graph.edges:
-        children[edge.source] += 1
-        parents[edge.target] += 1
-    return any(v > 1 for v in parents.values()) or any(v > 1 for v in children.values())
-
-
 def _should_use_pdf_flowchart(csv_graph: ManufacturingGraph, pdf_graph: ManufacturingGraph) -> bool:
-    """Use the PDF diagram when it carries a better real flow structure.
-
-    CSV files are still useful for counts/test details, but their edges are inferred
-    from stage names. For products with merge flows, the PDF diagram is the source of
-    truth because it preserves the actual arrows drawn in the manufacturing summary.
-    """
+    """Prefer extracted arrows only when every CSV process has one PDF counterpart."""
     if not pdf_graph.nodes or not pdf_graph.edges:
         return False
-    if not csv_graph.nodes:
-        return True
-    if _has_branch_or_merge(pdf_graph) and not _has_branch_or_merge(csv_graph):
-        return True
-    if len(pdf_graph.nodes) >= len(csv_graph.nodes) and len(pdf_graph.edges) >= len(csv_graph.edges):
-        return True
-    return False
+    csv_names = {_normalize(n.label) for n in csv_graph.nodes if n.kind == "process"}
+    pdf_names = {_normalize(n.label) for n in pdf_graph.nodes}
+    # Exporter buckets are not evidence of a manufacturing stage in the PDF.
+    return csv_names <= pdf_names and all(_node_kind(n.label) == "process" for n in pdf_graph.nodes)
+
+
+def _merge_csv_verdicts(pdf_graph: ManufacturingGraph, csv_graph: ManufacturingGraph) -> None:
+    csv_nodes = _unique_stage_lookup((n.label, n) for n in csv_graph.nodes)
+    for n in pdf_graph.nodes:
+        source = csv_nodes.get(_normalize(n.label))
+        if source is not None:
+            n.tests = list(source.tests)
+            n.pass_count, n.fail_count = source.pass_count, source.fail_count
+            n.hold_count, n.total_count = source.hold_count, source.total_count
+    used_ids = {n.id for n in pdf_graph.nodes}
+    for n in csv_graph.nodes:
+        if n.kind == "process":
+            continue
+        node_id = n.id
+        while node_id in used_ids:
+            node_id += "_check"
+        used_ids.add(node_id)
+        pdf_graph.nodes.append(replace(n, id=node_id, tests=list(n.tests)))
+    _layout_with_supplemental_checks(pdf_graph.nodes, pdf_graph.edges)
+    pdf_graph.layers = _build_layer_list(pdf_graph.nodes)
 
 
 def load_simulation_graph(
@@ -484,8 +562,9 @@ def load_simulation_graph(
 ) -> tuple[ManufacturingGraph, dict[str, dict[str, int]]]:
     """Load the simulation graph and final summary counts.
 
-    Counts come from summary_after.csv/summary.csv. Flow structure comes from CSV
-    inference by default, but a valid PDF flowchart with richer real arrows wins.
+    Counts come from summary_after.csv/summary.csv. PDF arrows win when all CSV
+    processes map uniquely. Document/unassigned checks remain disconnected display
+    nodes. Incomplete matching keeps the explicitly warned CSV inference.
     """
     csv_dir = Path(csv_dir)
     if explicit_summary_path is not None and Path(explicit_summary_path).exists():
@@ -499,20 +578,27 @@ def load_simulation_graph(
 
     if pdf_path:
         fc = extract_pdf_flowchart(Path(pdf_path))
+        graph.structure_provenance["reason"] = "pdf_not_found"
         if fc:
             node_names, edge_pairs = fc
             pdf_graph = build_graph_from_flowchart(product_name, node_names, edge_pairs, summary_counts)
             if _should_use_pdf_flowchart(graph, pdf_graph):
+                _merge_csv_verdicts(pdf_graph, graph)
                 graph = pdf_graph
+            else:
+                graph.structure_provenance["reason"] = "pdf_not_selected" if edge_pairs else "pdf_without_arrows"
 
     return graph, summary_counts
 def _after_lookup(after: dict[str, dict[str, int]]) -> dict[str, dict[str, int]]:
-    return {_normalize(k): v for k, v in after.items()}
+    return _unique_stage_lookup(after.items())
 
 
 def simulation_graph_to_json(graph: ManufacturingGraph, summary: dict[str, dict[str, int]]) -> str:
     """최종 summary 카운트를 화면 표시 필드와 after_* 목표 필드에 같이 직렬화한다."""
     summary_norm = _after_lookup(summary)
+    node_norm = _unique_stage_lookup((n.label, n) for n in graph.nodes)
+    if summary_norm.keys() - node_norm.keys():
+        raise ValueError("공정도에서 일부 판정 집계 단계를 찾을 수 없습니다. 누락된 숫자로 표시하지 않습니다.")
     nodes = []
     for n in graph.nodes:
         d = asdict(n)
@@ -537,5 +623,23 @@ def simulation_graph_to_json(graph: ManufacturingGraph, summary: dict[str, dict[
         "nodes": nodes,
         "edges": [asdict(e) for e in graph.edges],
         "layers": graph.layers,
+        "structure_provenance": dict(graph.structure_provenance),
     }
     return json.dumps(data, ensure_ascii=False)
+
+
+def simulation_structure_notice(graph_json: str) -> str | None:
+    """Trusted UI text for edge provenance, independent of judgement totals."""
+    evidence = json.loads(graph_json).get("structure_provenance") or {}
+    if evidence == {"source": "pdf_extracted", "reason": "selected_pdf"}:
+        return None
+    reasons = {
+        "no_pdf": "PDF 공정도를 제공하지 않아",
+        "pdf_not_found": "PDF에서 공정도 노드를 찾지 못해",
+        "pdf_without_arrows": "PDF에서 공정도 연결선을 찾지 못해",
+        "pdf_not_selected": "현재 구조 선택 기준에서 PDF 공정도가 선택되지 않아",
+    }
+    if evidence.get("source") == "csv_inferred" and evidence.get("reason") in reasons:
+        return (reasons[evidence["reason"]] + " CSV 단계명으로 추정한 연결선을 표시합니다. "
+                "실제 PDF의 공정 순서를 확인한 결과가 아닙니다. 판정 숫자는 현재 문서의 판정 요약을 사용합니다.")
+    return "공정도 연결선의 출처를 확인할 수 없습니다. 실제 PDF 공정 순서로 해석하지 마세요."

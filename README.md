@@ -1,5 +1,58 @@
 # SP 시험결과 자동검수 시스템
 
+> **2026-09-29 업데이트 · v104** — 기존 UI와 메일 수신을 유지하면서 SP/허가서 직접 업로드, 실행 가능한 MD 규칙, 허가 기준 대조, 판정·시뮬레이션 작업 분리 및 D00~D16 회귀를 추가했습니다. 아래 기존 설명에 최신 동작을 반영했습니다. 모든 제품·양식의 무오류 판정이나 의약품 출하 승인을 보장하는 시스템은 아닙니다.
+
+## 처음 보는 분을 위한 안내
+
+| 알고 싶은 것 | 문서 |
+|---|---|
+| 이번에 무엇을 바꿨고 어디까지 검증했는가 | [업데이트·인수인계](docs/RELEASE_20260929.md) |
+| 전체 흐름과 파일별 역할 | [시스템 구조](docs/SYSTEM_OVERVIEW.md) |
+| Python을 고치지 않고 MD 규칙을 수정하는 법 | [MD 작성·검증 안내](docs/MD_RULES_GUIDE.md) |
+| D02 개별 시험 표시, D13~D16, 정상 문서 보류 이유 | [사용자 제보 수정](docs/FEEDBACK_20260929.md) |
+| 아직 안 된 것 / A·B·C 요구사항 범위 | [검증 범위와 한계](docs/VALIDATION_SCOPE.md) |
+
+### 기존 코드와 크게 달라진 점
+
+- **입력**: Gmail 외에 화면의 파일 업로드로 SP PDF와 그 SP에 연결할 허가서를 함께 등록합니다. 문서함에는 원래 파일명도 표시합니다.
+- **MD**: `sp_pdf_judger/rules/`의 YAML front matter를 읽어 규칙을 실행합니다. `domain_details/`의 설명용 MD와는 다릅니다. 수치·기간·누락 등은 검증된 Python 연산으로, `semantic_review`는 CLOVA 의미 판단으로 처리합니다.
+- **허가서**: 연결된 허가서의 단계·시험·근거를 확인해 적용 기준을 대조합니다. 단순 검색 유사도만으로 통과시키지 않습니다. 불명확한 적용 범위나 환산 근거는 보류합니다.
+- **판정 일관성**: D02의 생존율이 맞더라도 관찰기간이 부족하면 해당 시험 카드도 불충족입니다. 문서 규칙 결과와 개별 시험의 상태·근거를 연결합니다.
+- **응답성·복구**: 검수/시뮬레이션 준비를 백그라운드 작업으로 분리하고, 캐시 식별·중복 실행·공유 상태 저장을 보호합니다. 실패한 판정의 단순 열람은 자동 유료 재시도를 하지 않습니다. 중간 단계부터 이어 하는 기능은 아직 미구현입니다.
+- **재현 자료**: `더미데이터/`에 승인된 합성 D00~D16, 더미 허가서, 판정기준 Word를 포함합니다. 실제 수신함·캐시·키는 포함하지 않습니다.
+
+### 빠른 실행 (Windows PowerShell)
+
+```powershell
+git clone https://github.com/anhyojin367/sp_semi.git
+cd sp_semi
+py -3.10 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+Copy-Item .env.example .env
+# .env의 CLOVA_API_KEY에 새로 발급한 본인 키를 입력합니다.
+.\.venv\Scripts\python.exe -m streamlit run sp_app.py --server.port 8501 --server.address 127.0.0.1
+```
+
+브라우저에서 `http://127.0.0.1:8501`을 엽니다. 8501이 사용 중이면 기존 서버를 확인하거나 포트를 8503 등으로 바꾸세요.
+새 복제본은 빈 문서함으로 시작합니다. **파일 업로드 → SP와 허가서 선택 → 등록 → 문서 선택 → 검수 진행** 순서로 사용합니다.
+직접 업로드에는 Gmail 로그인이 필요 없습니다. CLOVA 판정은 외부 전송·API 비용이 발생합니다.
+PDF 텍스트 추출과 달리 스캔 OCR에는 별도 OCR 환경이 필요하며, Windows OCR 관련 시험은 Windows 환경에서 검증했습니다.
+
+### 빠른 검증 (API 호출 없음)
+
+```powershell
+.\.venv\Scripts\python.exe scripts/validate_rules.py
+.\.venv\Scripts\python.exe scripts/prepare_test_fixtures.py
+.\.venv\Scripts\python.exe -m pytest -q -rs
+.\.venv\Scripts\python.exe scripts/validate_corpus.py --output-dir .local_validation/fresh_offline
+```
+
+저장 fixture 재생과 새 PDF 판정은 구별합니다. CLOVA 통합 검증은 `--live`를 명시해야 하며 별도 비용이 발생합니다.
+v104의 기존 자동시험 결과는 **1,622개 통과**(미구현 단계 재개 초안 7개 제외), 실제 D00~D16 오프라인 지정 오류 누락은 0건입니다.
+이번 게시본은 초안 7개를 기본 pytest에서 **사유가 보이는 skip**으로 남겼습니다. 게시 파일만 펼친 새 사본에서도 **1,622 통과 / 7 skip / 실패 0**을 재확인했습니다. 상세 검증 결과와 보류 사유는 [업데이트 기록](docs/RELEASE_20260929.md)을 참고하세요.
+
+> **보안 주의:** 과거 커밋의 예제 설정에 실키가 포함되어 있었습니다. 현재 예제는 빈 값이지만 Git 이력은 재작성하지 않았습니다. 해당 키는 폐기·재발급해야 합니다. `.env`와 `.streamlit/secrets.toml`은 Git에 올리지 마세요.
+
 > **Rule · RAG · LLM을 역할별로 분리한 의약품 SP 문서 자동검수 시스템**
 
 의약품 SP(Summary Protocol) PDF에서 제조 및 시험 정보를 구조화하고,  
@@ -321,20 +374,18 @@ Evidence Insufficient
 
 공통 RAG 문서와 제품별 허가서는 분리하여 관리합니다.
 
-제품별 허가서는 모든 제품에 대한 전역 검색 대상으로 사용하지 않고,  
-현재 SP 문서와 연결된 허가서만 추가 검토에 사용합니다.
+제품별 허가서는 모든 제품에 대한 전역 검색 대상으로 사용하지 않고,
+현재 SP 문서와 연결된 허가서만 검토에 사용합니다. 최신 경로에서는 보류 항목에만 한정하지 않고,
+SP 기준상 합격인 시험도 연결된 권위 있는 허가 기준과 대조합니다.
 
 ```text
-Initial Judgment
-      │
-      ▼
-     Hold
-      │
-      ▼
-Connected Permit Document
-      │
-      ▼
-Additional Evidence Review
+SP 기준 1차 판정 (Pass / Fail / Hold)
+      ↓
+연결 허가서의 적용 단계·시험·원문 근거 확인
+      ↓
+허가 기준 대조 + 확정 가능한 수치 재계산
+      ↓
+MD 규칙 / 개별 시험 상태 연결 → Pass / Fail / Hold
 ```
 
 이를 통해 다른 제품의 허가 정보가 잘못 검색되어 판정에 영향을 주는 위험을 줄입니다.
@@ -427,7 +478,7 @@ OUTPUT/
 | RAG | 관련 기준 및 참고 근거 검색 |
 | Domain Context | 회사·제품별 검수 관점 및 예외 제공 |
 | LLM | 정성적 의미 해석 및 보조 판정 |
-| Permit Review | Hold 항목에 대한 제품별 추가 근거 확인 |
+| Permit Review | 연결 허가서의 적용 범위·원문 근거 확인 및 허가 기준 우선 대조 |
 | Regression Logger | 판정 변화 및 사용 근거 추적 |
 
 ### Important
@@ -522,6 +573,15 @@ sp_semi/
 ├── sp_document_metadata.py
 │   └── 문서 Metadata 추출
 │
+├── sp_document_upload.py / sp_document_models.py
+│   └── SP·허가서 직접 업로드 및 제출 건 모델
+│
+├── sp_judgement_bridge.py / sp_review_jobs.py / sp_process_lock.py
+│   └── 검수 작업·캐시·프로세스 잠금 및 상태 저장
+│
+├── sp_simulation_jobs.py / sp_flowchart_data.py
+│   └── 시뮬레이션 비동기 준비·공정 및 판정 숫자 연결
+│
 ├── sp_pdf_viewer.py
 │   └── PDF 및 제조요약도 렌더링
 │
@@ -532,6 +592,12 @@ sp_semi/
 │   │
 │   ├── criteria_parser.py
 │   │   └── 시험기준 Parsing
+│   │
+│   ├── rules/ (document.md, sky_covione.md 등)
+│   │   └── 실행 가능한 MD 규칙 및 검토 설정
+│   │
+│   ├── policy_engine.py / policy_schema.py / policy_summary.py
+│   │   └── MD 검증·실행·개별 시험 상태 연결
 │   │
 │   ├── date_normalizer.py
 │   │   └── 날짜 정보 정규화
@@ -571,7 +637,10 @@ sp_semi/
 │   └── RULE_REGRESSION_AND_RAG_OPERATIONS.md
 │
 ├── tests/
-│   └── Rule / Domain Context 관련 테스트
+│   └── 추출·MD·허가·UI·동시성 회귀 및 과거 저장 fixture
+│
+├── 더미데이터/
+│   └── 공개 승인된 D00~D16, 더미 허가서, 판정기준 Word
 │
 ├── OUTPUT/
 │   └── 판정 결과 및 Regression Log
@@ -707,10 +776,13 @@ python -c "from sp_pdf_judger.rag import UcumRagStore; s=UcumRagStore(); print(l
 
 # 13. Test
 
-전체 테스트:
+개발 의존성을 설치하고 저장 fixture를 준비한 뒤 전체 테스트를 실행합니다.
+7개의 미구현 단계 재개 계약시험은 skip으로 표시하며, 환경 의존 시험의 skip도 `-rs`로 확인합니다.
 
 ```bash
-python -m pytest
+python -m pip install -r requirements-dev.txt
+python scripts/prepare_test_fixtures.py
+python -m pytest -q -rs
 ```
 
 Domain Context 관련 테스트:
@@ -722,6 +794,12 @@ python -m pytest tests/test_domain_details.py
 ---
 
 # 14. Adding New Rules
+
+**최신 실행 MD 경로는 `sp_pdf_judger/rules/`입니다.** 기존 연산으로 표현 가능한 조건은
+`document.md` / `sky_covione.md`의 구조화 규칙을 수정하고 검증하면 됩니다.
+자연어 의미 규칙은 `operation: semantic_review`로 명시합니다. 단순히 설명 문장을 아무 MD에 쓰면 자동 실행되는 것은 아닙니다.
+새로운 추출 필드나 지원하지 않는 연산이 필요하면 Python 구현과 회귀시험도 필요합니다.
+[실제 작성 예제와 명령](docs/MD_RULES_GUIDE.md)을 먼저 참고하세요. 아래는 기존 원칙입니다.
 
 새로운 검수 기준은 단순히 Prompt에 추가하지 않고, 먼저 규칙의 성격을 구분합니다.
 
@@ -805,6 +883,12 @@ Rule, RAG, Domain Context 변경이 기존 판정에 미치는 영향을 확인�
 ---
 
 # 16. Security & Data Sharing
+
+이번 버전에는 사용자 공개 승인을 받은 합성 더미자료와 허가서/참고자료가 포함됩니다.
+실제 메일 수신함(`incoming_sp_pdfs/`), 판정 상태(`.sp_judgement_status/`),
+렌더 PDF(`static/pdf_view/`), 가상환경·로컬 검증 캐시는 추적하지 않습니다.
+기존 로컬 파일은 삭제하지 않고 Git 추적에서만 제외했습니다.
+과거 커밋의 노출 키는 예제에서 삭제해도 무효화되지 않습니다. 반드시 발급처에서 폐기·재발급하세요.
 
 공개 Repository에는 실제 운영 과정에서 사용될 수 있는 다음 정보가 포함되지 않도록 관리합니다.
 

@@ -14,11 +14,14 @@ import fitz
 
 from .manufacturing_info_validator import (
     ManufacturingInfoValidationResult,
+    FieldCompareResult,
+    TestDateCompareResult,
     _norm_match,
     render_manufacturing_info_validation_card,
     validate_manufacturing_info_consistency,
 )
 from .schemas import ProcessingResult, Summary
+from .config import PASS_LABEL, FAIL_LABEL, HOLD_LABEL
 from .utils import clean_text
 
 
@@ -482,6 +485,15 @@ def _render_albumin_source_material_pages(result: ProcessingResult) -> str:
 
 
 def _evaluation_status_key(evaluation: Any) -> str:
+    # Reasons can discuss SP-only results or historical decisions. They must
+    # never override the authoritative current result used by the final card.
+    final_status = (clean_text(_get(evaluation, "final_status", ""))
+                    or clean_text(_get(evaluation, "status", ""))
+                    or clean_text(_get(evaluation, "judgement", "")))
+    explicit = {PASS_LABEL: "passed", FAIL_LABEL: "failed", HOLD_LABEL: "held"}
+    if final_status in explicit:
+        return explicit[final_status]
+
     reason = clean_text(_get(evaluation, "reason", ""))
     if not reason:
         reason = clean_text(_get(evaluation, "judgement_reason", ""))
@@ -811,6 +823,8 @@ def _build_stage_test_summary_map(result: ProcessingResult) -> dict[str, dict]:
         }
 
     for evaluation in evaluations:
+        if _get(evaluation, "source", "") == "md_policy":
+            continue  # Document rules are not additional physical laboratory tests.
         status_key = _evaluation_status_key(evaluation)
 
         if not status_key:
@@ -1359,7 +1373,16 @@ def render_manufacturing_summary_with_stage_cards(
     result: ProcessingResult,
     summary_counts_path: Path | str | None = None,
 ) -> str:
-    manufacturing_results = validate_manufacturing_info_consistency(result)
+    if "manufacturing_info_cards" in result.metadata:
+        # Modern results are judged once by the MD engine. Rendering must not
+        # run an independent legacy policy or invent extra test date checks.
+        manufacturing_results = [ManufacturingInfoValidationResult(
+            stage_name=row["stage_name"], status=row["status"], source_count=row["source_count"],
+            fields=[FieldCompareResult(**item) for item in row["fields"]],
+            test_dates=[TestDateCompareResult(**item) for item in row["test_dates"]])
+            for row in result.metadata["manufacturing_info_cards"]]
+    else:
+        manufacturing_results = validate_manufacturing_info_consistency(result)
     info_validation_html = render_manufacturing_info_validation_card(
         result,
         validation_results=manufacturing_results,

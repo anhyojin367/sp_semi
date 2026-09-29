@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 
 from .utils import clean_text
@@ -109,6 +110,14 @@ UNIT_ALIASES = {
 
 
 KNOWN_UNITS = sorted(UNIT_ALIASES.keys(), key=len, reverse=True)
+
+
+def normalize_measurement_text(text: str | None) -> str:
+    # Compatibility unit glyphs (㎍, ㎖, ㎛) are formatting, not new units.
+    # Keep superscripts unchanged so exponents and squared units retain meaning.
+    value = "".join(unicodedata.normalize("NFKC", char) if "\u3300" <= char <= "\u33ff" else char
+                    for char in clean_text(text)).replace("µ", "μ").replace("％", "%")
+    return re.sub(r"(?<=[A-Za-zμ])\s*/\s*(?=[A-Za-zμ])", "/", value)
 
 
 def _superscript(exp: str) -> str:
@@ -228,7 +237,7 @@ def parse_number_and_unit(text: str | None) -> ParsedMeasurement | None:
     - ≤100.0EU/mL
     - 25EU/mL
     """
-    text = clean_text(text)
+    text = normalize_measurement_text(text)
 
     if not text:
         return None

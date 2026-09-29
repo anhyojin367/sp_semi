@@ -1,6 +1,10 @@
 {
   "catalog_version": "1.0",
   "audited_at": "2026-09-06",
+  "scope": "historical_snapshot",
+  "code_reference_revision": "db045c5",
+  "current_scope_document": "docs/VALIDATION_SCOPE.md",
+  "scope_note": "이 카탈로그는 기존 커밋의 2026-09-06 감사 기록이다. 코드 근거 경로는 해당 커밋 기준이며 현재 MD 규칙의 구현/검증 범위를 뜻하지 않는다. 최신 상태는 current_scope_document를 따른다.",
   "status_definition": {
     "구현": "요구사항을 직접 판정하는 실행 로직과 결과 출력 경로가 코드에 존재함",
     "부분 구현": "추출 또는 일부 하위 조건은 구현됐지만 요구사항 전체를 독립적으로 판정하지 못함",

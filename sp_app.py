@@ -10,7 +10,6 @@ import mimetypes
 import re
 import shutil
 import time
-from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import quote, unquote
@@ -20,8 +19,13 @@ import streamlit.components.v1 as components
 
 from sp_gmail_ingest import DEFAULT_STORE_DIR, GmailConfig, download_gmail_sp_pdfs
 from sp_company_logos import find_company_logo
+from sp_document_upload import list_uploaded_sps, render_upload_dialog
+from sp_document_models import InboxDocument, ReferenceDocument
 from sp_pdf_judger.domain_details import resolve_domain_detail_profile
-from sp_flowchart_data import load_simulation_graph, simulation_graph_to_json
+from sp_pdf_judger.policy_engine import policy_fingerprint
+from sp_pdf_judger.permit_catalog import resolve_submission_permits
+from sp_simulation_jobs import get_simulation_job, forget_failed_simulation
+from sp_flowchart_data import simulation_structure_notice
 from sp_sim2_viewer import build_simulation_html as build_sim2_html
 STORE_DIR = Path(os.getenv("SP_PDF_DIR", str(DEFAULT_STORE_DIR)))
 STATIC_PDF_DIR = Path("static") / "pdf_view"
@@ -35,13 +39,14 @@ DEFAULT_GMAIL_SINCE = date(2026, 1, 1)
 GMAIL_CONFIRMATION_VERSION = "manual-gmail-confirm-20260602-v2"
 JUDGEMENT_STATUS_DIR = Path(__file__).resolve().parent / ".sp_judgement_status"
 JUDGEMENT_STATUS_INDEX = JUDGEMENT_STATUS_DIR / "status_index.json"
-APP_CACHE_VERSION = "sp-ui-cache-v88-20260902-version-warning-only"
-JUDGEMENT_STATUS_CACHE_VERSION = "sp-app-direct-bridge-v53-20260729-domain-details"
+APP_CACHE_VERSION = "sp-ui-cache-v104-20260929-negative-result"
+JUDGEMENT_STATUS_CACHE_VERSION = "sp-app-direct-bridge-v104-20260929-negative-result"
 
 
 def _ensure_current_cache_version() -> None:
     session_key = "_sp_app_cache_version"
-    if st.session_state.get(session_key) == APP_CACHE_VERSION:
+    previous_version = st.session_state.get(session_key)
+    if previous_version == APP_CACHE_VERSION:
         return
 
     for key in list(st.session_state.keys()):
@@ -49,7 +54,12 @@ def _ensure_current_cache_version() -> None:
             st.session_state.pop(key, None)
     st.session_state.pop("latest_judgement_artifact_key", None)
     try:
-        st.cache_data.clear()
+        # Cache data is shared across sessions. Opening a final-page link or a
+        # new tab must not discard already parsed PDFs for every browser.
+        # Existing sessions still migrate on a real application version change;
+        # each cached loader also retains its file/version signature checks.
+        if previous_version is not None:
+            st.cache_data.clear()
     except Exception:
         pass
     st.session_state[session_key] = APP_CACHE_VERSION
@@ -59,6 +69,8 @@ def _load_judgement_bridge():
     from sp_judgement_bridge import (
         attach_after_summary_targets,
         ensure_judgement_artifacts,
+        get_judgement_job,
+        forget_failed_judgement_attempt,
         patch_graph_json_with_summary,
         render_final_judgement_page,
     )
@@ -66,6 +78,8 @@ def _load_judgement_bridge():
     return {
         "attach_after_summary_targets": attach_after_summary_targets,
         "ensure_judgement_artifacts": ensure_judgement_artifacts,
+        "get_judgement_job": get_judgement_job,
+        "forget_failed_judgement_attempt": forget_failed_judgement_attempt,
         "patch_graph_json_with_summary": patch_graph_json_with_summary,
         "render_final_judgement_page": render_final_judgement_page,
     }
@@ -96,34 +110,6 @@ ORG_LOGO_FILES: dict[str, str] = {
     "동국대": "dongguk_university_trim.png",
     "식약처": "mfds_trim.png",
 }
-
-
-@dataclass(frozen=True)
-class InboxDocument:
-    path: Path
-    company: str
-    product: str
-    title: str
-    product_number: str
-    version: str
-    received_date: str
-    subject: str
-    source: str = "Gmail"
-    permit_files: tuple[Path, ...] = ()
-
-
-@dataclass(frozen=True)
-class ReferenceDocument:
-    company: str
-    product: str
-    title: str
-    doc_id: str
-    version: str
-    effective_date: str
-    status: str
-    pages: int
-    checks: int
-    owner: str
 
 
 REFERENCE_LIBRARY: tuple[ReferenceDocument, ...] = (
@@ -636,67 +622,33 @@ def main() -> None:
 SIMULATION_HEIGHT = 1120
 
 
-def _sim_signature(csv_dir: Path, pdf_path: Path | None, explicit_summary_path: Path | None = None) -> tuple:
-    """PDF / summary / stage CSV 변경 시 캐시를 무효화하기 위한 시그니처."""
-    csv_dir = Path(csv_dir)
-    parts: list[tuple[str, int, int]] = []
-
-    for p in (
-        pdf_path,
-        explicit_summary_path,
-        csv_dir.parent / "summary_after.csv",
-        csv_dir.parent / "summary.csv",
-        csv_dir / "summary_after.csv",
-        csv_dir / "summary.csv",
-    ):
-        try:
-            if p:
-                stat = Path(p).stat()
-                parts.append((str(Path(p)), int(stat.st_size), int(stat.st_mtime_ns)))
-            else:
-                parts.append(("", 0, 0))
-        except OSError:
-            parts.append((str(p or ""), 0, 0))
-
-    # summary 파일만 보던 기존 캐시는 stage CSV 교체/추가를 못 알아차릴 수 있다.
-    # 새 메일 데이터처럼 CSV 폴더 내용이 바뀐 경우 시뮬레이션 JSON을 반드시 다시 만든다.
-    try:
-        for item in sorted(csv_dir.glob("*.csv"), key=lambda x: x.name):
-            stat = item.stat()
-            parts.append((item.name, int(stat.st_size), int(stat.st_mtime_ns)))
-    except OSError:
-        pass
-
-    return tuple(parts)
-
-
-@st.cache_data(show_spinner=False)
-def _cached_simulation(csv_dir_str: str, pdf_str: str, signature: tuple, summary_after_str: str = "") -> tuple[str, str]:
-    """실제 PDF 구조 + 판정 결과 summary 카운트로 시뮬레이션 JSON 을 만든다(캐시).
-
-    summary_after_str 이 주어지면 해당 CSV 를 단일 출처로 사용해
-    Gmail·시뮬레이션·판정 세 섹션의 카운트가 항상 일치하도록 한다.
-    """
-    explicit_summary = Path(summary_after_str) if summary_after_str else None
-    graph, summary = load_simulation_graph(
-        Path(csv_dir_str),
-        Path(pdf_str) if pdf_str else None,
-        explicit_summary_path=explicit_summary,
-    )
-    return simulation_graph_to_json(graph, summary), graph.product_name
-
-
 def _simulation_finish_delay_seconds(graph_json: str, permit_enabled: bool) -> float:
-    try:
-        data = json.loads(graph_json)
-        node_count = len(data.get("nodes") or [])
-    except Exception:
-        node_count = 8
+    # Presentation only; never a substitute for actual completed artifacts.
+    return 12.0
 
-    # sp_sim2_viewer.py 타임라인과 맞춘 보수적 예상치.
-    # 허가서는 별도 봇이 아니라 시험 기준 판별 근거 중 하나로 표현되므로 추가 왕복 시간을 더하지 않는다.
-    delay = 3.8 + node_count * 1.55
-    return max(7.0, min(delay, 28.0))
+
+@st.fragment(run_every=1.0)
+def _render_pending_review(job):
+    if job.future.done():
+        st.rerun()
+    message, elapsed = job.snapshot()
+    st.markdown(
+        f'<div class="sim-transition-notice">{_escape(message)}'
+        f' · 경과 {int(elapsed)}초<br>실제 판정 처리 중입니다. 목록으로 이동해도 작업은 유지됩니다.</div>',
+        unsafe_allow_html=True,
+    )
+
+
+@st.fragment(run_every=1.0)
+def _render_pending_simulation(job):
+    if job.future.done():
+        st.rerun()
+    message, elapsed = job.snapshot()
+    st.markdown(
+        f'<div class="sim-transition-notice">{_escape(message)}'
+        f' · 경과 {int(elapsed)}초<br>시뮬레이션 준비 중입니다. 목록으로 이동해도 작업은 유지됩니다.</div>',
+        unsafe_allow_html=True,
+    )
 
 
 def _render_inline_simulation(product: str, pdf_path: Path | None = None) -> float:
@@ -725,8 +677,12 @@ def _render_inline_simulation(product: str, pdf_path: Path | None = None) -> flo
 
     try:
         selected_doc_for_judge = _document_from_pdf(pdf_path)
-    except Exception:
-        selected_doc_for_judge = None
+    except Exception as exc:
+        st.error(f"제출 문서 정보를 읽지 못해 검수를 중단했습니다: {exc}")
+        return 0.0
+    if selected_doc_for_judge is None:
+        st.error("제출 문서 정보를 확인할 수 없어 검수를 중단했습니다.")
+        return 0.0
 
     permit_paths = []
 
@@ -734,7 +690,6 @@ def _render_inline_simulation(product: str, pdf_path: Path | None = None) -> flo
         permit_paths = [
             Path(path)
             for path in getattr(selected_doc_for_judge, "permit_files", ()) or []
-            if Path(path).exists()
         ]
 
     try:
@@ -757,53 +712,46 @@ def _render_inline_simulation(product: str, pdf_path: Path | None = None) -> flo
     # 시뮬레이션은 정적 CSV/이전 CSV를 보고, 최종 페이지는 새 summary_after.csv를 봐서 숫자가 어긋났다.
     if artifacts is None and selected_doc_for_judge is not None:
         try:
-            artifacts = bridge["ensure_judgement_artifacts"](
+            job = bridge["get_judgement_job"](
                 pdf_path=pdf_path,
                 permit_paths=permit_paths,
                 original_csv_dir=Path(csv_dir),
                 company=str(getattr(selected_doc_for_judge, "company", "") or ""),
                 product=str(getattr(selected_doc_for_judge, "product", "") or ""),
             )
+            if not job.future.done():
+                _render_pending_review(job)
+                return -1.0
+            artifacts = job.future.result()
         except Exception as exc:
-            st.warning(
-                "최종 판정 요약을 먼저 생성하지 못해 시뮬레이션 카운트가 "
-                f"정적 CSV 기준으로 표시될 수 있습니다: {exc}"
-            )
+            st.error(f"판정 생성에 실패하여 검수를 중단했습니다. 이전 결과로 대체하지 않습니다: {exc}")
+            return 0.0
+
+    if not artifacts or not artifacts.get("summary_after_path") or not Path(artifacts["summary_after_path"]).is_file():
+        st.error("현재 문서의 판정 요약이 없어 검수를 중단했습니다. 이전 결과로 대체하지 않습니다.")
+        return 0.0
 
     runtime_csv_dir = Path(artifacts.get("runtime_csv_dir")) if artifacts and artifacts.get("runtime_csv_dir") else Path(csv_dir)
 
     # 판정 완료 후 생성된 summary_after.csv를 단일 출처로 사용한다.
-    summary_after_path: Path | None = None
-    summary_after_str = ""
-    if artifacts and artifacts.get("summary_after_path"):
-        _sp = Path(str(artifacts["summary_after_path"]))
-        if _sp.exists():
-            summary_after_path = _sp
-            summary_after_str = str(_sp)
-
+    summary_after_path = Path(artifacts["summary_after_path"])
     try:
-        graph_json, product_name = _cached_simulation(
-            str(runtime_csv_dir),
-            str(pdf_path) if pdf_path else "",
-            (APP_CACHE_VERSION, *_sim_signature(runtime_csv_dir, pdf_path, summary_after_path)),
-            summary_after_str,
+        graph_job = get_simulation_job(
+            runtime_csv_dir, pdf_path, summary_after_path, version=APP_CACHE_VERSION,
         )
-        try:
-            graph_payload = json.loads(graph_json)
-            if not isinstance(graph_payload.get("nodes"), list) or not graph_payload.get("nodes"):
-                raise ValueError("제조요약도 노드가 비어 있습니다.")
-        except Exception as graph_exc:
-            st.warning(
-                "제조요약도 시뮬레이션 데이터를 만들지 못했습니다. "
-                f"CSV 폴더를 확인해 주세요: {runtime_csv_dir} ({graph_exc})"
-            )
-            return 0.0
+        if not graph_job.future.done():
+            _render_pending_simulation(graph_job)
+            return -1.0
+        graph_json, product_name = graph_job.future.result()
     except Exception as exc:
-        st.error(f"제조요약도 데이터를 읽을 수 없습니다: {exc}")
+        st.error(f"제조요약도 데이터를 읽을 수 없습니다: {exc}. 목록에서 검수 진행을 다시 눌러 주세요.")
         return 0.0
 
     final_graph_json = graph_json
     has_permit_pdf = bool(permit_paths)
+    structure_notice = simulation_structure_notice(final_graph_json)
+    if structure_notice:
+        st.warning(structure_notice)
 
     html = build_sim2_html(
         final_graph_json,
@@ -828,6 +776,15 @@ def _cached_simulation_artifacts_for_doc(
 
     record = _status_record_for_doc(doc, _load_judgement_status_index())
     if not isinstance(record, dict) or record.get("status") != "completed":
+        return None
+
+    # An index entry is not permission to reuse an older PDF's final counts.
+    try:
+        stat = pdf_path.stat()
+        signature = record.get("pdf_sig") or {}
+        if (signature.get("size"), signature.get("mtime_ns")) != (stat.st_size, stat.st_mtime_ns):
+            return None
+    except OSError:
         return None
 
     detail_profile = resolve_domain_detail_profile(
@@ -855,7 +812,7 @@ def _cached_simulation_artifacts_for_doc(
 def _summary_paths_from_status_record(record: dict) -> tuple[Path | None, Path | None]:
     before = Path(str(record.get("summary_before_path", "") or ""))
     after = Path(str(record.get("summary_after_path", "") or ""))
-    if before.exists() and after.exists():
+    if before.is_file() and after.is_file():
         return before, after
 
     artifact_key = str(record.get("artifact_key", "") or "").strip()
@@ -863,7 +820,7 @@ def _summary_paths_from_status_record(record: dict) -> tuple[Path | None, Path |
         status_dir = JUDGEMENT_STATUS_DIR / artifact_key
         local_before = status_dir / "summary_before.csv"
         local_after = status_dir / "summary_after.csv"
-        if local_before.exists() and local_after.exists():
+        if local_before.is_file() and local_after.is_file():
             return local_before, local_after
 
     return None, None
@@ -948,7 +905,7 @@ def _render_topbar(*, show_gmail: bool = True) -> None:
         for name, domain in ORG_LOGO_DOMAINS.items()
     )
     if show_gmail:
-        brand_col, gmail_col = st.columns([6.5, 1.1], gap="large", vertical_alignment="center")
+        brand_col, upload_col, gmail_col = st.columns([5.4, 1.1, 1.1], gap="large", vertical_alignment="center")
     else:
         brand_col = st.container()
         gmail_col = None
@@ -968,6 +925,9 @@ def _render_topbar(*, show_gmail: bool = True) -> None:
             unsafe_allow_html=True,
         )
     if gmail_col is not None:
+        with upload_col:
+            if st.button("파일 업로드", key="manual-upload-toggle", use_container_width=True):
+                render_upload_dialog(STORE_DIR, _load_inbox_documents(), _on_upload_saved)
         with gmail_col:
             _render_gmail_toggle()
 
@@ -1408,21 +1368,35 @@ def _last_sync_status() -> str:
     return time.strftime("%H:%M:%S", time.localtime(value))
 
 
+def _on_upload_saved(selected: Path) -> None:
+    selected = selected.resolve()
+    _clear_document_caches()
+    st.session_state["selected_pdf_path"] = str(selected)
+    selected_doc = _document_from_pdf(selected)
+    st.session_state["reference_company_filter"] = selected_doc.company
+    st.session_state["reference_product_filter"] = selected_doc.product
+    for key in list(st.session_state):
+        if str(key).startswith("sp_direct_judgement_artifacts::") or str(key).startswith("sim_signature"):
+            st.session_state.pop(key, None)
+    st.session_state.pop("latest_judgement_artifact_key", None)
+
+
 def _load_inbox_documents() -> list[InboxDocument]:
+    local_documents = [_document_from_pdf(path) for path in list_uploaded_sps(STORE_DIR)]
     if not _gmail_session_confirmed():
-        return []
+        return local_documents
 
     since = _gmail_confirmed_since_date()
     store_dir = _current_gmail_store_dir()
 
     if store_dir is None or not store_dir.exists():
-        return []
+        return local_documents
 
     index = _load_gmail_index(store_dir)
     files = index.get("files", {})
 
     if not isinstance(files, dict):
-        return []
+        return local_documents
 
     pdfs: list[Path] = []
 
@@ -1456,7 +1430,7 @@ def _load_inbox_documents() -> list[InboxDocument]:
         reverse=True,
     )
 
-    return [_document_from_pdf(pdf) for pdf in pdfs]
+    return local_documents + [_document_from_pdf(pdf) for pdf in pdfs]
 
 
 def _current_gmail_store_dir() -> Path | None:
@@ -1499,10 +1473,10 @@ def _document_from_pdf_cached(
 
     company = _extract_company(text, lower_name)
     product = _extract_product(text, lower_name)
-    title = _extract_title(text, filename, product)
     version = _extract_version(text, lower_name)
     number = _extract_product_number(text, lower_name)
     product = _map_unknown_sky_covione_product(company, product, number)
+    title = _extract_title(text, filename, product)
     received_date = _extract_received_date(pdf)
     subject = _extract_subject_from_index(pdf)
     permit_files = _related_permit_files(pdf)
@@ -1516,6 +1490,7 @@ def _document_from_pdf_cached(
         version=version,
         received_date=received_date,
         subject=subject,
+        source="직접 업로드" if _index_record(pdf).get("source") == "upload" else "Gmail",
         permit_files=permit_files,
     )
 
@@ -1612,49 +1587,19 @@ def _status_record_for_doc(doc: InboxDocument, index: dict) -> dict | None:
         return None
 
     exact = docs.get(_pdf_status_key(doc.path))
-    if isinstance(exact, dict):
-        if exact.get("cache_version") == JUDGEMENT_STATUS_CACHE_VERSION:
-            return exact
-        # 이전 버전 기록이 정확히 매칭되더라도 더 아래에서 같은 파일명의 최신 기록을 찾는다.
+    # Identically-sized files or similar names are not interchangeable submissions.
+    if not isinstance(exact, dict) or exact.get("cache_version") != JUDGEMENT_STATUS_CACHE_VERSION:
+        return None
+    if exact.get("rule_fingerprint") != policy_fingerprint():
+        return None
+    current = resolve_submission_permits(_related_permit_files(doc.path), doc.company, doc.product)
+    if exact.get("permit_fingerprint") != current.fingerprint:
+        return None
+    details = resolve_domain_detail_profile(doc.company, doc.product)
+    if exact.get("detail_fingerprint") != details.fingerprint:
+        return None
+    return exact
 
-    try:
-        stat = doc.path.stat()
-        size = int(stat.st_size)
-        mtime_ns = int(stat.st_mtime_ns)
-    except Exception:
-        size = -1
-        mtime_ns = -1
-
-    doc_name = doc.path.name.casefold()
-    best: dict | None = None
-    best_score = -1
-
-    for candidate in docs.values():
-        if not isinstance(candidate, dict):
-            continue
-        if candidate.get("cache_version") != JUDGEMENT_STATUS_CACHE_VERSION:
-            continue
-
-        score = 0
-        sig = candidate.get("pdf_sig", {})
-        if isinstance(sig, dict):
-            if _safe_int(sig.get("size", -2)) == size and size >= 0:
-                score += 4
-            if _safe_int(sig.get("mtime_ns", -2)) == mtime_ns and mtime_ns >= 0:
-                score += 2
-
-        raw_path = str(candidate.get("pdf_path", ""))
-        cand_name = Path(raw_path).name.casefold()
-        if cand_name and cand_name == doc_name:
-            score += 3
-        elif cand_name and (cand_name in doc_name or doc_name in cand_name):
-            score += 1
-
-        if score > best_score:
-            best_score = score
-            best = candidate
-
-    return best if best_score >= 4 else None
 
 
 def _judgement_status_for_doc(doc: InboxDocument) -> dict:
@@ -1787,14 +1732,14 @@ def _related_permit_files(pdf: Path) -> tuple[Path, ...]:
     index = _load_gmail_index(pdf.parent)
 
     # 1순위: index에 명시된 related_permit_files만 사용
-    related_names = [str(name) for name in record.get("related_permit_files", []) if name]
+    related_names = [str(name) for name in record.get("manual_permit_files", record.get("related_permit_files", [])) if name]
     permits: list[Path] = []
 
     for name in related_names:
         candidate = pdf.parent / name
         other = index.get("files", {}).get(name, {})
 
-        if not candidate.exists():
+        if candidate.resolve().parent != pdf.parent.resolve() or not candidate.exists():
             continue
 
         if isinstance(other, dict):
@@ -1804,7 +1749,7 @@ def _related_permit_files(pdf: Path) -> tuple[Path, ...]:
 
         permits.append(candidate)
 
-    if permits:
+    if permits or "manual_permit_files" in record:
         return tuple(permits)
 
     # 2순위: 같은 message_id에 있는 permit만 연결
@@ -1905,6 +1850,12 @@ def _extract_company(text: str, lower_name: str) -> str:
 
 
 def _extract_product(text: str, lower_name: str) -> str:
+    # Prefer the labelled PDF field; a filename is not product identity evidence.
+    match = re.search(r"제\s*품\s*명\s*[:|]?\s*([^\r\n]+)", text)
+    if match:
+        candidate = _clean_phrase(match.group(1), ("생기수재명", "허가번호", "제조번호"))
+        if candidate and candidate not in {"미확인", "제품명"}:
+            return candidate
     if "안티트롬빈" in lower_name:
         return "안티트롬빈III주 500아이유"
     if "지씨플루" in lower_name:
@@ -2047,6 +1998,8 @@ def _normalized_gmail_index(index: dict, folder: Path) -> dict:
     by_message: dict[str, list[dict]] = {}
     for record in files.values():
         if not isinstance(record, dict):
+            continue
+        if record.get("source") == "upload" or "manual_permit_files" in record:
             continue
         if not record.get("size_bytes"):
             try:
@@ -2304,6 +2257,7 @@ def _render_inbox_card(doc: InboxDocument, selected: bool, gate: dict, idx: int)
               <span>제품/제조번호</span><b>{_escape(doc.product_number)}</b>
               <span>제출 버전</span><b>{_escape(version)}</b>
               <span>접수일</span><b>{_escape(doc.received_date)}</b>
+              <span>문서 제목</span><b>{_escape(_source_document_name(doc.path))}</b>
               <span>허가서</span><b>{_escape(permit_summary)}</b>
               <span>수신 제목</span><b>{_escape(subject)}</b>
             </div>
@@ -2353,10 +2307,14 @@ def _render_inbox_card(doc: InboxDocument, selected: bool, gate: dict, idx: int)
             st.rerun()
 
 
+def _source_document_name(path: Path) -> str:
+    return str(_index_record(path).get("original_name") or re.sub(r"^\d{8}_\d{6}_", "", path.name))
+
+
 def _permit_summary(doc: InboxDocument) -> str:
     if not doc.permit_files:
         return "없음"
-    names = [re.sub(r"^\d{8}_\d{6}_", "", permit.name) for permit in doc.permit_files]
+    names = [_source_document_name(permit) for permit in doc.permit_files]
     if len(names) == 1:
         return f"{names[0]} 있음"
     return f"{len(names)}개 있음: {', '.join(names[:2])}"
@@ -2412,6 +2370,7 @@ def _is_allowed_pdf_viewer_path(path: Path) -> bool:
         app_dir / "incoming_sp_pdfs",
         STORE_DIR,
         app_dir / "static" / "pdf_view",
+        app_dir / "sp_pdf_judger" / "permits",
     )
     for root in allowed_roots:
         try:
@@ -2615,7 +2574,7 @@ def _render_pdf_viewer_page() -> None:
         <div class="pdf-viewer-top">
           <div>
             <h1>{_escape(pdf_path.name)}</h1>
-            <span>메일로 수신된 원본 PDF를 앱 안에서 표시합니다.</span>
+            <span>등록된 원본 PDF를 앱 안에서 표시합니다.</span>
           </div>
         </div>
         """,
@@ -2629,10 +2588,24 @@ def _render_pdf_viewer_page() -> None:
         use_container_width=True,
     )
 
-    rendered_pages = _render_pdf_pages_for_viewer(
-        str(pdf_path),
-        _file_cache_signature(pdf_path),
-    )
+    requested_page = _safe_int(st.query_params.get("page", "0"))
+    if requested_page > 0:
+        try:
+            import fitz
+            with fitz.open(pdf_path) as document:
+                if requested_page > len(document):
+                    st.error("원본 PDF에 없는 페이지입니다.")
+                    return
+                pix = document[requested_page - 1].get_pixmap(matrix=fitz.Matrix(1.65, 1.65), alpha=False)
+                rendered_pages = {"pages": [{"page": requested_page, "image": base64.b64encode(pix.tobytes("png")).decode()}]}
+        except (OSError, RuntimeError) as error:
+            st.error(f"근거 페이지를 읽을 수 없습니다: {type(error).__name__}")
+            return
+    else:
+        rendered_pages = _render_pdf_pages_for_viewer(
+            str(pdf_path),
+            _file_cache_signature(pdf_path),
+        )
     if rendered_pages.get("pages"):
         st.markdown(
             """
@@ -2897,13 +2870,13 @@ def _render_reference_panel(
             unsafe_allow_html=True,
         )
         _sim_pdf = st.session_state.get("sim_pdf", "")
-        _render_inline_simulation(
+        finish_delay = _render_inline_simulation(
             st.session_state.get("sim_product", ""),
             Path(_sim_pdf) if _sim_pdf else None,
         )
         notice_slot.empty()
         st.markdown('<div class="action-bar">', unsafe_allow_html=True)
-        if _sim_pdf:
+        if _sim_pdf and finish_delay > 0:
             final_href = f"./?view=judge_final&pdf={quote(str(_sim_pdf), safe='')}"
             st.markdown(
                 f"""
@@ -2946,7 +2919,7 @@ def _render_reference_panel(
                   color:#ffffff !important;
                 }}
                 </style>
-                <a class="final-judge-after-sim" href="{final_href}" target="_self">최종 판정 페이지로 이동</a>
+                <a class="final-judge-after-sim is-visible" href="{final_href}" target="_self">최종 판정 페이지로 이동</a>
                 """,
                 unsafe_allow_html=True,
             )
@@ -2987,6 +2960,8 @@ def _render_reference_panel(
             return
 
         selected_pdf_text = str(selected_doc.path)
+        _load_judgement_bridge()["forget_failed_judgement_attempt"](selected_doc.path)
+        forget_failed_simulation(selected_doc.path)
 
         st.session_state["run_sim"] = True
         st.session_state["sim_product"] = selected_doc.product

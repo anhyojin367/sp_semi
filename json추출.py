@@ -1464,13 +1464,83 @@ class PDFReader(BasePDFReader):
 # Normalizer
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _is_version_page_table(matrix: Optional[List[List[str]]]) -> bool:
+    """Recognize only tables made entirely of version/date and explicit page labels.
+
+    A ratio, date, numeric table, or a table containing even one measurement is
+    insufficient. Do not repair fragmented page numbers here: the source layer
+    retains them unchanged for the separate document-structure checks.
+    """
+    version = re.compile(r"\b(?:Ver\.?|Version)\s*\d+(?:\.\d+)*\b", re.I)
+    version_date = re.compile(r"\(\d{4}[.\-/]\d{1,2}[.\-/]\d{1,2}\)")
+    page_label = re.compile(
+        r"(?:\d+\s+)?\d+\s*/\s*\d+\s*페이지"
+        r"|페이지\s*\d+\s*/\s*\d+"
+        r"|\bPage\s+\d+\s+(?:of\s+\d+)\b", re.I)
+    saw_version = saw_page = False
+    for row in matrix or []:
+        text = " ".join(clean_text(str(cell or "")) for cell in row).strip()
+        if not text:
+            continue
+        text, versions = version.subn(" ", text)
+        saw_version |= bool(versions)
+        if versions:
+            text = version_date.sub(" ", text)
+        text, page_labels = page_label.subn(" ", text)
+        saw_page |= bool(page_labels)
+        if versions:
+            # A narrow version cell may contain only the denominator, with the
+            # numerator in the following row. Match complete page labels first
+            # so a spaced '2 / 18' never leaves an orphaned result-like '2'.
+            text, fragments = re.subn(r"/\s*\d+\s*페이지", " ", text)
+            saw_page |= bool(fragments)
+        if text.strip():
+            return False
+    return saw_version and saw_page
+
+
 class Normalizer:
     def __init__(self):
         self._idx = 0
         self._last_section_number: Optional[str] = None
+        self.page_furniture: List[Dict[str, Any]] = []
+
+    def _separate_page_furniture(self, matrix, text, page_num, top=None, bbox=None):
+        if not _is_version_page_table(matrix):
+            return False
+        self.page_furniture.append({
+            "pdf_page": page_num, "reason": "version_page_table", "text": text,
+            "table": matrix, "top": top, "bbox": bbox,
+        })
+        return True
 
     def run(self, pages: List[RawPage]) -> List[Item]:
         items = []
+        # Some edited PDFs expose the version/page label only as an image.
+        # Identify the same compact protocol-title/lot header on distinct pages;
+        # never globally strip lot numbers from the document body or cover.
+        candidates = []
+        protocol = re.compile(r"Summary\s*Protocol\s*for\s*Production\s*and\s*Quality\s*control\s*:?", re.I)
+        for page in pages:
+            elements = page.ordered_elements or []
+            for title in elements:
+                if title.kind != "text" or not 0 <= title.top <= 110 or not protocol.fullmatch(title.text):
+                    continue
+                for lot in elements:
+                    if (lot.kind != "text" or not 0 < lot.top - title.top <= 60
+                        or not re.fullmatch(r"제조번호\s*[:：]\s*\S+", lot.text)):
+                        continue
+                    between = [el for el in elements if title.top < el.top < lot.top]
+                    if any(el.kind != "text" or not any(p.fullmatch(el.text) for p in CFG.noise_patterns)
+                           for el in between):
+                        continue
+                    candidates.append((page.page_num, title.top, lot))
+        self._repeated_header_lots = {
+            (page, lot.top, lot.text) for page, top, lot in candidates
+            if any(other_page != page and abs(other_top - top) <= 2
+                   and abs(other.top - lot.top) <= 2 and other.text == lot.text
+                   for other_page, other_top, other in candidates)
+        }
         for page in pages:
             items.extend(self._normalize_page(page))
         return items
@@ -1479,6 +1549,19 @@ class Normalizer:
         out = []
         if page.ordered_elements:
             pending_text_lines = []
+            header_bands = []
+            for elem in page.ordered_elements:
+                bbox = elem.meta.get("bbox")
+                if elem.kind != "table" or not bbox or len(bbox) != 4:
+                    continue
+                if not _is_version_page_table(elem.meta.get("table")):
+                    continue
+                band = (elem.top, elem.top + abs(bbox[3] - bbox[1]))
+                if any(other.kind == "text" and band[0] <= other.top <= band[1]
+                       and re.fullmatch(r"Summary\s*Protocol\s*for\s*Production\s*and\s*Quality\s*control\s*:?",
+                                        other.text, re.I)
+                       for other in page.ordered_elements):
+                    header_bands.append(band)
 
             def flush_text_lines():
                 nonlocal out, pending_text_lines
@@ -1490,10 +1573,31 @@ class Normalizer:
 
             for elem in page.ordered_elements:
                 if elem.kind == "text":
+                    if (page.page_num, elem.top, elem.text) in self._repeated_header_lots:
+                        self.page_furniture.append({
+                            "pdf_page": page.page_num, "reason": "repeated_protocol_header",
+                            "text": elem.text, "top": elem.top,
+                        })
+                        continue
+                    # A detached lot line inside a positively identified protocol
+                    # header is metadata, not continuation of the previous result.
+                    # Body lot fields and unlocated/ambiguous lines remain intact.
+                    if (re.fullmatch(r"제조번호\s*[:：]\s*\S+", elem.text)
+                        and any(lo <= elem.top <= hi for lo, hi in header_bands)):
+                        self.page_furniture.append({
+                            "pdf_page": page.page_num, "reason": "linked_version_header",
+                            "text": elem.text, "top": elem.top,
+                        })
+                        continue
                     pending_text_lines.append(elem.text)
                 elif elem.kind == "table":
                     flush_text_lines()
                     table_text = clean_text(elem.text)
+                    if self._separate_page_furniture(
+                        elem.meta.get("table"), table_text, page.page_num,
+                        elem.top, elem.meta.get("bbox"),
+                    ):
+                        continue
                     if table_text and not is_comment_only_text(table_text):
                         out.append(self._make_item(
                             "table_block", page.page_num, table_text,
@@ -1610,6 +1714,8 @@ class Normalizer:
         out = []
         for table_idx, table in enumerate(tables):
             table_text = render_table(table)
+            if self._separate_page_furniture(table, table_text, page_num):
+                continue
             if table_text and not is_comment_only_text(table_text):
                 out.append(self._make_item("table_block", page_num, table_text, {"table_idx": table_idx}))
         return out
@@ -4125,7 +4231,7 @@ class RecordExtractor:
                     else:
                         current_test.add_field(field_name, value)
                         pending_label = field_name
-                elif field_name is None and pending_label in {"criteria", "method", "remarks"}:
+                elif field_name is None and pending_label in {"criteria", "result", "method", "remarks"}:
                     is_footnote_key = key.startswith("*") or key.startswith("(") or bool(re.match(r"^[①②③④⑤\*\(\[#]", key))
                     if not is_footnote_key:
                         composite = f"{key}: {value}" if key else value
@@ -4525,7 +4631,8 @@ class Pipeline:
         out_dir = Path(output_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
         pages = PDFReader(pdf_path).read()
-        items = Normalizer().run(pages)
+        normalizer = Normalizer()
+        items = normalizer.run(pages)
         sections = SectionBuilder().run(items)
         blocks = BlockBuilder().run(items, sections)
         records = RecordExtractor().run(blocks)
@@ -4564,6 +4671,7 @@ class Pipeline:
             "summary": {key: value for key, value in summary.items() if key != "output_dir"},
             "page_headers": [_extract_page_header(page) for page in pages],
             "pages": [asdict(x) for x in pages],
+            "extraction_cleanup": normalizer.page_furniture,
             "records": [asdict(x) for x in records],
         }
         self._save_json(document_result, out_dir / "06_extraction_result.json")

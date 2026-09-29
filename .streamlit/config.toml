@@ -1,0 +1,3 @@
+[server]
+# Match the PDF validator and the upload dialog's advertised per-file limit.
+maxUploadSize = 100

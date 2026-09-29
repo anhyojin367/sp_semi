@@ -616,6 +616,10 @@ def _format_criteria_display(value: str | None) -> str | None:
 
 
 def _status_from_explicit_reason(status: str | None, reason: str | None = None) -> str | None:
+    # Mixed explanations (SP vs permit, previous vs current) are not statuses.
+    explicit = clean_text(status)
+    if explicit in (PASS_LABEL, FAIL_LABEL, HOLD_LABEL):
+        return explicit
     reason_text = clean_text(reason or "")
 
     if not reason_text:
@@ -783,7 +787,7 @@ def _display_judgement_reason_text(text: str | None) -> str:
 
 
 def _render_reason_box(ev) -> str:
-    if not getattr(ev, "comparison_completed", False):
+    if not _has_visible_judgement(ev):
         return ""
 
     rows = getattr(ev, "lot_judgements", None) or []
@@ -802,9 +806,11 @@ def _render_reason_box(ev) -> str:
     normalized = ""
 
     if ev.normalized_criteria or ev.normalized_result:
+        criteria_label = ("적용 허가서 기준" if getattr(ev, "source", "").startswith("permit_pdf")
+                          else "정규화 시험기준")
         normalized = f"""
         <div style="margin-top:12px;color:#4b5563;line-height:1.7;font-size:16px;">
-          {f'<div>정규화 시험기준: {html_escape(_display_judgement_reason_text(ev.normalized_criteria))}</div>' if ev.normalized_criteria else ''}
+          {f'<div>{criteria_label}: {html_escape(_display_judgement_reason_text(ev.normalized_criteria))}</div>' if ev.normalized_criteria else ''}
           {f'<div>정규화 시험결과: {html_escape(_display_judgement_reason_text(ev.normalized_result))}</div>' if ev.normalized_result else ''}
         </div>
         """
@@ -816,6 +822,14 @@ def _render_reason_box(ev) -> str:
       {normalized}
     </div>
     """
+
+
+def _has_visible_judgement(ev) -> bool:
+    # Incomplete comparison is not an unprocessed record: evidence/quality
+    # HOLDs already count in the summary and must also explain themselves.
+    return bool(getattr(ev, "comparison_completed", False) or (
+        getattr(ev, "final_status", None) == HOLD_LABEL and getattr(ev, "reason", None)
+    ))
 
 
 def _render_test_leaf(node: TreeNode, depth_px: int) -> str:
@@ -834,7 +848,7 @@ def _render_test_leaf(node: TreeNode, depth_px: int) -> str:
             getattr(ev, "final_status", None),
             getattr(ev, "reason", None),
         )
-        if getattr(ev, "comparison_completed", False)
+        if _has_visible_judgement(ev)
         else None
     )
 

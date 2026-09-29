@@ -78,6 +78,25 @@ def _engine(client, policy=AUTHORITATIVE_POLICY):
     )
 
 
+def test_authoritative_hold_preserves_grounding_failure_diagnostic():
+    response = JudgeResponse(status=HOLD_LABEL, reason="not a trusted diagnostic",
+        permit_match_status="ambiguous", matched_permit_test="", permit_basis="")
+    response._permit_grounding_errors = ["clause_id=1: procedure의 PASS는 허용되지 않습니다."]
+    client = FakePermitLLM(response)
+    result = _engine(client).judge_record(_record())
+    assert result.final_status == HOLD_LABEL
+    assert "clause_id=1" in result.reason and "procedure" in result.reason
+
+
+def test_model_cannot_inject_private_grounding_diagnostic():
+    response = JudgeResponse.model_validate({"status": HOLD_LABEL, "reason": "api/429 private",
+        "permit_match_status": "ambiguous", "_permit_grounding_errors": ["api/429 private"]})
+    result = _engine(FakePermitLLM(response)).judge_record(_record())
+    assert response._permit_grounding_errors == []
+    assert "429" not in result.reason
+    assert "_permit_grounding_errors" not in JudgeResponse.model_json_schema()["properties"]
+
+
 class _CapturingPermitStore:
     def __init__(self, permit_pdf_paths=None, policy=None):
         self.permit_pdf_paths = list(permit_pdf_paths or [])

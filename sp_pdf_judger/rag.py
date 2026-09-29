@@ -294,6 +294,9 @@ class UcumRagStore:
                 continue
 
             domain = self._rag_domain_for_path(path)
+            if domain == "허가서":
+                # Product-specific approvals belong only to the explicitly linked permit store.
+                continue
 
             try:
                 pdf = fitz.open(path)

@@ -17,6 +17,19 @@ venv/
 *.log
 dist/
 build/
+.local_validation/
+tmp/
+# Approved synthetic documents are versioned in 더미데이터/.
+# User submissions, mail indexes, rendered copies and judgement caches stay local.
+incoming_sp_pdfs/
+.sp_judgement_status/
+static/pdf_view/
+.pytest_cache/
+.coverage
+htmlcov/
+outputs/*
+!outputs/README.md
+WORK_STATUS.md
 
 OUTPUT/*.xlsx
 OUTPUT/rule_regression_index.json

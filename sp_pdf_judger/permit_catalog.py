@@ -79,3 +79,17 @@ def resolve_permits(explicit_paths: Iterable[Path], company: str | None, product
             resolved = [path for path in resolved if path != catalog_file]
     hashes = tuple(_sha256(path) for path in resolved)
     return ResolvedPermit(policy, tuple(resolved), _fingerprint(entry, tuple(resolved), hashes, catalog_valid, catalog_hash), tuple(errors), catalog_valid)
+
+
+def resolve_submission_permits(explicit_paths: Iterable[Path], company: str | None,
+                               product: str | None, package_dir: Path | None = None) -> ResolvedPermit:
+    """An explicitly linked permit replaces catalog defaults, never mixes with them."""
+    paths = tuple(dict.fromkeys(Path(p).resolve() for p in explicit_paths))
+    if not paths:
+        return resolve_permits([], company, product, package_dir)
+    valid = tuple(p for p in paths if p.is_file())
+    errors = tuple(f"linked permit missing: {p.name}" for p in paths if not p.is_file())
+    policy = PermitPolicy("submission-linked", True, True, True, "auto")
+    entry = {"policy_id": policy.policy_id, "company": company, "product": product}
+    fingerprint = _fingerprint(entry, paths, tuple(_sha256(p) if p.is_file() else "missing" for p in paths), None, None)
+    return ResolvedPermit(policy, valid, fingerprint, errors, False if errors else None)

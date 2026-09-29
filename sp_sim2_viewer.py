@@ -72,7 +72,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script async src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{min-height:100%;height:auto}
@@ -332,6 +332,7 @@ topo.forEach(nid=>{
 });
 function showInd(nid){gsap.to(indEls[nid].g,{opacity:1,duration:.25})}
 function countUp(nid){  // 표시 대상 값으로 카운트업 (허가서가 있으면 after, 없으면 before)
+  if(finished)return;
   const n=nodesById[nid];
   const targets=PERMIT_ENABLED?afterCounts(n):null;
   updateSummary(nid, targets || null);
@@ -342,7 +343,7 @@ function countUp(nid){  // 표시 대상 값으로 카운트업 (허가서가 �
     gsap.to(s.dot,{attr:{fill:s.color},duration:.3});
     s.num.setAttribute('fill',s.color);
     const p={v:0};
-    gsap.to(p,{v:s.target,duration:.7,ease:'power1.out',onUpdate:()=>{s.num.textContent=Math.round(p.v)}});
+    gsap.to(p,{v:s.target,duration:.7,ease:'power1.out',onUpdate:()=>{if(!finished)s.num.textContent=Math.round(p.v)}});
   });
 }
 function updateSummary(nid, counts){return;}
@@ -361,7 +362,7 @@ function afterCounts(n){
   };
 }
 function recountAfter(nid){  // 허가서 검토 후 after 값으로 재집계 (현재값 → after)
-  if(!PERMIT_ENABLED)return;
+  if(finished||!PERMIT_ENABLED)return;
   const n=nodesById[nid],info=indEls[nid];
   const tgt=afterCounts(n);
   n.pass_count=tgt.pass;
@@ -381,7 +382,7 @@ function recountAfter(nid){  // 허가서 검토 후 after 값으로 재집계 (
       gsap.fromTo(s.dot,{attr:{r:6}},{attr:{r:9},duration:.28,yoyo:true,repeat:1});
     }
     const p={v:cur};
-    gsap.to(p,{v:tgt[k],duration:.7,ease:'power1.out',onUpdate:()=>{s.num.textContent=Math.round(p.v)}});
+    gsap.to(p,{v:tgt[k],duration:.7,ease:'power1.out',onUpdate:()=>{if(!finished)s.num.textContent=Math.round(p.v)}});
   });
 }
 
@@ -701,7 +702,36 @@ const st=document.getElementById('status-text');
 
 // ════════ 타임라인 ════════
 const MOVE=0.34,DRAW=0.42,OCR_STEP=0.58,REV=0.45,BOT_OFFSET=72,TOP_BOT_OFFSET=denseGraph?44:72;
-let built=false,finished=false,running=false,tl=null;
+let built=false,finished=false,running=false,tl=null,finishTimer=null,presentationStarted=0;
+const MAX_PRESENTATION_SECONDS=12;
+
+function finishPresentation(){
+  if(finished)return;
+  finished=true; running=false;
+  clearTimeout(finishTimer);
+  if(tl)tl.kill();
+  // Counts are already computed by Python. Animation failure must not hide
+  // them or manufacture a new verdict, including the no-permit path.
+  topo.forEach(nid=>{
+    const n=nodesById[nid],info=indEls[nid];
+    boxes[nid].g.style.opacity=1;
+    boxes[nid].rect.style.strokeDashoffset=0;
+    info.g.style.opacity=1;
+    const counts=PERMIT_ENABLED?afterCounts(n):{pass:n.pass_count,hold:n.hold_count,fail:n.fail_count};
+    ['pass','hold','fail'].forEach(k=>{
+      info.els[k].num.textContent=counts[k];
+      info.els[k].num.setAttribute('fill',info.els[k].color);
+      info.els[k].dot.setAttribute('fill',info.els[k].color);
+    });
+  });
+  Object.values(edgeEls).forEach(e=>{e.el.style.opacity=1;});
+  [structureBot,validateBot,judgeBot].forEach(bot=>{bot.style.opacity=0;});
+  document.getElementById('pwf-3').classList.add('on');
+  enableEndBoxNavigation();
+  st.textContent='검수 완료 — 최종 판정 페이지로 이동할 수 있습니다';
+  st.dataset.presentationMs=String(Math.round(performance.now()-presentationStarted));
+  revealFinalJudgementLink();
+}
 
 function buildTimeline(){
   const tl=gsap.timeline({paused:true});
@@ -822,10 +852,17 @@ function begin(){
   if(running)return;
   if(finished){location.reload();return;}
   running=true;
+  presentationStarted=performance.now();
   hintL.style.display='none';
-  if(!built){tl=buildTimeline();built=true;}
-  tl.eventCallback('onComplete',()=>{finished=true;revealFinalJudgementLink();});
-  tl.play();
+  // CDN unavailable/offline: show the actual final graph without animation.
+  if(typeof gsap==='undefined'){finishPresentation();return;}
+  try{
+    if(!built){tl=buildTimeline();built=true;}
+    tl.timeScale(Math.max(1,tl.duration()/MAX_PRESENTATION_SECONDS));
+    tl.eventCallback('onComplete',finishPresentation);
+    finishTimer=setTimeout(finishPresentation,(MAX_PRESENTATION_SECONDS+2)*1000);
+    tl.play();
+  }catch(error){finishPresentation();}
 }
 hit.addEventListener('click',begin);
 hit.addEventListener('mouseenter',()=>{startP.rect.setAttribute('stroke',C_B);startP.rect.setAttribute('stroke-width',2.6);startP.g.style.filter='drop-shadow(0 0 12px '+C_B+'aa)';});

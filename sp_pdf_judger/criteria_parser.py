@@ -80,7 +80,9 @@ def _measurement_quality(parsed: ParsedMeasurement | None) -> int:
 
 
 def _number_start_positions(text: str) -> list[int]:
-    return [m.start() for m in re.finditer(r"[+-]?\d[\d,]*(?:\.\d+)?", text)]
+    # A scientific value is one number: never reparse its exponent as a threshold.
+    return [m.start() for m in re.finditer(
+        r"[+-]?\d[\d,]*(?:\.\d+)?(?:\s*[xX×]\s*10\s*\^?\s*[+\-]?[\d⁰¹²³⁴⁵⁶⁷⁸⁹⁻⁺]+)?", text)]
 
 
 def _parse_last_measurement(text: str) -> ParsedMeasurement | None:

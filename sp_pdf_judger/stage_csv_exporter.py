@@ -96,6 +96,10 @@ def _status_to_csv_text(status: str | None) -> str:
 
 
 def _status_from_explicit_reason(status: str | None, reason: str | None = None) -> str | None:
+    # Keep reason-only inference for legacy records, not as a second judge.
+    explicit = clean_text(status)
+    if explicit in (PASS_LABEL, FAIL_LABEL, HOLD_LABEL):
+        return explicit
     reason_text = clean_text(reason or "")
 
     if not reason_text:
@@ -206,7 +210,7 @@ def _summary_row(stage_name: str, evaluations: list[Evaluation]) -> dict[str, st
             for item in lot_judgements:
                 status = clean_text(_status_from_explicit_reason(item.get("status", ""), item.get("reason", "")))
                 item_reason = clean_text(item.get("reason", "") or item.get("judgement_reason", ""))
-                if not item_reason and parent_status in {PASS_LABEL, FAIL_LABEL}:
+                if status not in {PASS_LABEL, FAIL_LABEL, HOLD_LABEL} and not item_reason and parent_status in {PASS_LABEL, FAIL_LABEL}:
                     status = parent_status
 
                 if status == PASS_LABEL:
