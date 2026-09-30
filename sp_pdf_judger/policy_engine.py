@@ -21,6 +21,7 @@ from .permit_pdf_store import PermitPdfStore
 from .policy_criteria import resolve_criterion
 from .policy_schema import RuleSelector, Text, load_frontmatter, validate_params
 from .policy_time import complete_timestamp, complete_duration_seconds, seconds_text
+from .table_values import field_values, material_rows
 
 DEFAULT_RULE_DIR = Path(__file__).parent / "rules"
 
@@ -95,18 +96,13 @@ def context_text(record):
 
 
 def field_value(record, label):
-    for line in (record.content or "").splitlines():
-        match = re.match(r"^\s*" + r"\s*".join(map(re.escape, label)) + r"\s*[:|]?\s*(.*)$", line)
-        if match:
-            return match.group(1).strip()
-    return ""
+    values = field_values(record.content or "", label)
+    return values[0] if len(values) == 1 else ""
 
 
 def unique_field_value(record, label):
     """Date/limit fields must be unique; duplicate rows need source review."""
-    pattern = r"^\s*" + r"\s*".join(map(re.escape, label)) + r"\s*[:|]?\s*(.*)$"
-    values = [match[1].strip() for line in (record.content or "").splitlines()
-              if (match := re.match(pattern, line))]
+    values = field_values(record.content or "", label)
     return values[0] if len(values) == 1 else ""
 
 
@@ -584,12 +580,7 @@ def mass_balance(rule, ctx):
         text = content.split(start, 1)[1].split(end, 1)[0]
         rows = [line.strip() for line in text.splitlines() if line.strip()]
         amounts, incomplete = [], False
-        for row in rows:
-            cells = [cell.strip() for cell in row.strip("|").split("|")]
-            if len(cells) > 1 and norm(cells[-1]) == norm(rule.params.get("amount_header", "분량")):
-                continue
-            if re.fullmatch(r"[|:\-\s]+", row):
-                continue
+        for cells in material_rows(rows, rule.params.get("amount_header", "분량")):
             amount = quantity.fullmatch(cells[-1]) if len(cells) > 1 else None
             if not amount:
                 incomplete = True

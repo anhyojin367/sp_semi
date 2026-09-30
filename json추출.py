@@ -61,6 +61,9 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 
 import pdfplumber
+from sp_pdf_judger.extraction_runtime import (
+    extraction_backend, runtime_manifest, file_sha256, validate_extraction_report,
+)
 
 # Keep redirected console output readable on Windows/Powershell when paths or
 # summaries contain Korean text. JSON files themselves are still UTF-8.
@@ -359,6 +362,7 @@ class RawPage:
     text: str
     tables: List[List[List[str]]]
     ordered_elements: List[OrderedElement] = field(default_factory=list)
+    native_text: str = ""
 
 
 @dataclass
@@ -1022,6 +1026,8 @@ def join_nonempty(parts: List[str], sep=" | ") -> str:
 class BasePDFReader:
     def __init__(self, pdf_path: str):
         self.pdf_path = pdf_path
+        self.page_audit = []
+        self.warnings = []
 
     def _bbox_overlaps(self, a, b, min_ratio: float = 0.10) -> bool:
         if not a or not b:
@@ -1280,6 +1286,13 @@ class BasePDFReader:
                 tables_with_bbox = []
                 ordered_elements = []
                 words = page.extract_words(x_tolerance=2, y_tolerance=3, keep_blank_chars=False, use_text_flow=False) or []
+                source_text = " ".join(str(w.get("text", "")) for w in words)
+                self.page_audit.append({
+                    "page": i, "word_count": len(words), "image_count": len(page.images),
+                    "unreadable": bool(re.search(r"\(cid:\d+\)|\ufffd", source_text)),
+                    "image_only": not source_text.strip() and bool(page.images),
+                    "vector_only": not source_text.strip() and bool(page.curves),
+                })
 
                 for tbl in page.find_tables():
                     raw = tbl.extract() or []
@@ -1338,34 +1351,48 @@ class BasePDFReader:
                 ordered_elements.sort(key=lambda e: (e.top, 0 if e.kind == "text" else 1))
                 page_text = "\n".join(e.text for e in ordered_elements if e.kind == "text")
                 page_tables = [tbl for _bbox, tbl in tables_with_bbox]
-                pages.append(RawPage(i, clean_text(page_text), page_tables, ordered_elements))
+                pages.append(RawPage(i, clean_text(page_text), page_tables, ordered_elements, source_text))
+                self.page_audit[-1]["table_count"] = len(page_tables)
+                # pdfplumber retains char/layout caches per page unless closed.
+                # RawPage contains plain values, so releasing these is safe.
+                page.close()
         return pages
 
 
 class PDFReader(BasePDFReader):
     def read(self) -> List[RawPage]:
-        pages = super().read()
-        try:
-            import fitz
-            import camelot
-        except Exception:
-            return pages
-        try:
-            page_heights: Dict[int, float] = {}
-            with fitz.open(self.pdf_path) as doc:
-                for i, page in enumerate(doc, start=1):
-                    page_heights[i] = float(page.rect.height)
-            camelot_tables = camelot.read_pdf(self.pdf_path, pages="all", flavor="lattice")
-        except Exception:
-            return pages
-
-        by_page: Dict[int, List[Any]] = {}
-        for tbl in camelot_tables:
+        backend = extraction_backend()
+        if backend == "hybrid":
             try:
+                import camelot
+                import fitz
+            except ImportError as exc:
+                raise RuntimeError("hybrid 표 추출에 필요한 의존성이 없습니다. requirements.txt를 설치하거나 "
+                                   "검증용 SP_TABLE_BACKEND=pdfplumber를 명시하세요.") from exc
+        pages = super().read()
+        if backend == "pdfplumber":
+            return pages
+        page_heights: Dict[int, float] = {}
+        with fitz.open(self.pdf_path) as doc:
+            for i, page in enumerate(doc, start=1):
+                page_heights[i] = float(page.rect.height)
+        by_page: Dict[int, List[Any]] = {}
+        # Bound the rasterization/table detector batch even for hundreds of pages.
+        for start in range(1, len(pages) + 1, 16):
+            stop = min(start + 15, len(pages))
+            try:
+                tables = camelot.read_pdf(self.pdf_path, pages=f"{start}-{stop}", flavor="lattice")
+            except Exception as exc:
+                # Explicitly fail rather than silently changing the review input.
+                raise RuntimeError(f"표 추출 실패: {start}~{stop}쪽. PDF 원본은 보존되었습니다.") from exc
+            for tbl in tables:
                 page_num = int(tbl.page)
-            except Exception:
-                continue
-            by_page.setdefault(page_num, []).append(tbl)
+                # Keep only values/geometry, not Camelot's page raster/contours.
+                by_page.setdefault(page_num, []).append({
+                    "rows": tbl.df.values.tolist(), "cols": getattr(tbl, "cols", []),
+                    "bbox": getattr(tbl, "_bbox", None),
+                })
+            del tables
 
         if not by_page:
             return pages
@@ -1404,12 +1431,8 @@ class PDFReader(BasePDFReader):
             kept_elements = [e for e in page.ordered_elements if e.kind != "table"]
             new_tables = []
             for table_idx, tbl in enumerate(tables_on_page):
-                try:
-                    df = tbl.df
-                except Exception:
-                    continue
                 matrix = []
-                for row in df.values.tolist():
+                for row in tbl["rows"]:
                     norm_row = [clean_text(c) for c in row]
                     if any(norm_row):
                         matrix.append(norm_row)
@@ -1418,7 +1441,7 @@ class PDFReader(BasePDFReader):
 
                 col_centers = []
                 try:
-                    col_boundaries = tbl.cols
+                    col_boundaries = tbl["cols"]
                     col_centers = [
                         (col_boundaries[j] + col_boundaries[j + 1]) / 2.0
                         for j in range(len(col_boundaries) - 1)
@@ -1433,7 +1456,7 @@ class PDFReader(BasePDFReader):
                 bbox = None
                 top = 9999.0 + table_idx
                 try:
-                    bbox = tuple(float(x) for x in tbl._bbox)
+                    bbox = tuple(float(x) for x in tbl["bbox"])
                     page_h = page_heights.get(page.page_num, 1000.0)
                     top = page_h - bbox[3]
                 except Exception:
@@ -4630,7 +4653,15 @@ class Pipeline:
     def run(self, pdf_path, output_dir):
         out_dir = Path(output_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
-        pages = PDFReader(pdf_path).read()
+        reader = PDFReader(pdf_path)
+        pages = reader.read()
+        report = {"runtime": runtime_manifest(), "total_pages": len(pages),
+                  "source_sha256": file_sha256(Path(pdf_path)),
+                  "processed_pages": [p.page_num for p in pages], "pages": reader.page_audit,
+                  "warnings": reader.warnings,
+                  "blocking_issues": [a for a in reader.page_audit if a["image_only"] or a["unreadable"] or a["vector_only"]]}
+        self._save_json(report, out_dir / "extraction_report.json")
+        validate_extraction_report(report)
         normalizer = Normalizer()
         items = normalizer.run(pages)
         sections = SectionBuilder().run(items)
@@ -4653,7 +4684,7 @@ class Pipeline:
         }
         self._save_json(summary, out_dir / "summary.json")
         source_path = Path(pdf_path)
-        sha256 = hashlib.sha256(source_path.read_bytes()).hexdigest()
+        sha256 = report["source_sha256"]
         document_result = {
             "schema_version": "2.0",
             "extraction_contract": {
@@ -4672,6 +4703,7 @@ class Pipeline:
             "page_headers": [_extract_page_header(page) for page in pages],
             "pages": [asdict(x) for x in pages],
             "extraction_cleanup": normalizer.page_furniture,
+            "extraction_report": report,
             "records": [asdict(x) for x in records],
         }
         self._save_json(document_result, out_dir / "06_extraction_result.json")

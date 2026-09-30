@@ -12,6 +12,7 @@ from .permit_ocr import PermitPageText, extract_permit_page_texts
 from .permit_source_ownership import PermitSourceDocument, PermitSourceSpan, make_span, node_id
 from .schemas import ExtractedRecord
 from .utils import clean_text
+from .extraction_runtime import file_sha256
 
 
 _HEADING_RE = re.compile(r"(?m)^\s*(?P<section>\d+(?:\.\d+)+(?:\.)?|\d+\.)\s+(?P<title>[^\n]+?)\s*$")
@@ -190,7 +191,7 @@ class PermitPdfStore:
             return []
         self.extraction_errors.extend(errors)
         return self._parse_page_texts(pages, pdf_path.name,
-                                      pdf_sha256=hashlib.sha256(pdf_path.read_bytes()).hexdigest())
+                                      pdf_sha256=file_sha256(pdf_path))
 
     def _split_page_into_sections(self, source_file: str, page_number: int, text: str) -> list[PermitChunk]:
         """Compatibility helper for callers that still split one physical page."""

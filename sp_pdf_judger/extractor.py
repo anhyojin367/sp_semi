@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import locale
 import subprocess
 import sys
 from pathlib import Path
@@ -73,7 +72,7 @@ def extract_records(pdf_path: Path, output_dir: Path) -> List[ExtractedRecord]:
         cmd,
         capture_output=True,
         text=True,
-        encoding=locale.getpreferredencoding(False),
+        encoding="utf-8",
         errors="replace",
     )
 

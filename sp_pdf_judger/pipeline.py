@@ -15,6 +15,7 @@ import fitz
 from .config import FAIL_LABEL, HOLD_LABEL, PASS_LABEL
 from .domain_details import DomainDetailProfile, DomainDetailStore
 from .extractor import extract_records
+from .extraction_runtime import read_extraction_report, validate_extraction_report
 from .hierarchy import build_document_tree
 from .judgement import JudgeEngine
 from .llm import ClovaJudgeClient
@@ -694,6 +695,11 @@ class DocumentJudgePipeline:
         else:
             records = list(extracted_records)
 
+        extraction_report = read_extraction_report(extract_dir)
+        validate_extraction_report(extraction_report)
+        if not records:
+            raise RuntimeError("PDF에서 검토할 레코드를 추출하지 못했습니다. 빈 결과를 충족으로 처리하지 않습니다.")
+
         test_records = [
             r for r in records
             if getattr(r, "record_type", "") == "test"
@@ -809,6 +815,7 @@ class DocumentJudgePipeline:
                 "extract_dir": str(extract_dir),
                 "run_workspace": str(work_dir),
                 "extraction_reused": bool(reused_extract_dir),
+                "extraction_report": extraction_report,
                 "rag_doc_count": len(self.rag_store.docs),
                 "rag_sources": self.rag_store.loaded_sources,
                 "permit_pdf_count": len(self.permit_store.permit_pdf_paths),

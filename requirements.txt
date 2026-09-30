@@ -1,14 +1,19 @@
-streamlit>=1.46
-pypdf
-pypdfium2
-pillow
+# Validated runtime versions; do not silently upgrade the UI or PDF engines.
+streamlit==1.47.0
+pypdf==3.17.4
+pypdfium2==5.8.0
+pillow==11.0.0
 
-pymupdf>=1.24
-pdfplumber>=0.11
-pytesseract>=0.3.10
-scikit-learn>=1.5
-openai>=1.40.0
-pydantic>=2.8
-python-dotenv>=1.0
-openpyxl
-PyYAML>=6.0.0
+pymupdf==1.27.2.3
+pdfplumber==0.11.6
+pdfminer.six==20250327
+camelot-py==1.0.9
+pytesseract==0.3.13
+scikit-learn==1.5.0
+openai==3.19.0
+pydantic==2.11.7
+python-dotenv==1.1.0
+openpyxl==3.1.5
+PyYAML==6.0.2
+opencv-python-headless==4.13.0.92
+pandas==2.2.2

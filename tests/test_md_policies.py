@@ -38,7 +38,15 @@ def test_actual_dummy_pdf_policies(key):
     findings = evaluate_policies(ctx, book)
     failed = {f.rule_id for f in findings if f.status == "FAIL"}
     assert EXPECTED[key] <= failed
-    assert not [f for f in findings if f.status == "HOLD"]
+    holds = {f.rule_id for f in findings if f.status == "HOLD"}
+    if key == "D02":
+        # This historical extraction still contains the finished-product lot
+        # footer inside two upstream records. Never pick the first of conflicting
+        # lots as a valid value. Fresh PDF extraction is tested separately in
+        # test_extraction_page_furniture and the D00-D16 corpus runner.
+        assert holds == {"R04"}
+    else:
+        assert not holds
     assert not [f for f in findings if f.details.get("execution_error")]
     if key == "D00":
         assert failed == set()

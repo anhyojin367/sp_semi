@@ -305,7 +305,7 @@ def test_pipeline_metadata_includes_permit_resolution_and_extraction_diagnostics
 
     result = pipeline_module.DocumentJudgePipeline(
         permit_pdf_paths=[explicit_permit], company="다른 회사", product="다른 제품"
-    ).run(pdf_path, extracted_records=[])
+    ).run(pdf_path, extracted_records=[ExtractedRecord(record_type="content", content="문서 정보", page_start=1)])
 
     assert result.metadata["permit_paths"] == [str(explicit_permit.resolve())]
     assert result.metadata["permit_policy_id"] is None

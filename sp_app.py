@@ -23,6 +23,7 @@ from sp_document_upload import list_uploaded_sps, render_upload_dialog
 from sp_document_models import InboxDocument, ReferenceDocument
 from sp_pdf_judger.domain_details import resolve_domain_detail_profile
 from sp_pdf_judger.policy_engine import policy_fingerprint
+from sp_pdf_judger.extraction_runtime import extraction_fingerprint
 from sp_pdf_judger.permit_catalog import resolve_submission_permits
 from sp_simulation_jobs import get_simulation_job, forget_failed_simulation
 from sp_flowchart_data import simulation_structure_notice
@@ -39,8 +40,8 @@ DEFAULT_GMAIL_SINCE = date(2026, 1, 1)
 GMAIL_CONFIRMATION_VERSION = "manual-gmail-confirm-20260602-v2"
 JUDGEMENT_STATUS_DIR = Path(__file__).resolve().parent / ".sp_judgement_status"
 JUDGEMENT_STATUS_INDEX = JUDGEMENT_STATUS_DIR / "status_index.json"
-APP_CACHE_VERSION = "sp-ui-cache-v104-20260929-negative-result"
-JUDGEMENT_STATUS_CACHE_VERSION = "sp-app-direct-bridge-v104-20260929-negative-result"
+APP_CACHE_VERSION = "sp-ui-cache-v105-portable-extraction"
+JUDGEMENT_STATUS_CACHE_VERSION = "sp-app-direct-bridge-v105-portable-extraction"
 
 
 def _ensure_current_cache_version() -> None:
@@ -67,6 +68,7 @@ def _ensure_current_cache_version() -> None:
 
 def _load_judgement_bridge():
     from sp_judgement_bridge import (
+        _has_runtime_llm_failure,
         attach_after_summary_targets,
         ensure_judgement_artifacts,
         get_judgement_job,
@@ -76,6 +78,7 @@ def _load_judgement_bridge():
     )
 
     return {
+        "has_runtime_llm_failure": _has_runtime_llm_failure,
         "attach_after_summary_targets": attach_after_summary_targets,
         "ensure_judgement_artifacts": ensure_judgement_artifacts,
         "get_judgement_job": get_judgement_job,
@@ -727,6 +730,10 @@ def _render_inline_simulation(product: str, pdf_path: Path | None = None) -> flo
             st.error(f"판정 생성에 실패하여 검수를 중단했습니다. 이전 결과로 대체하지 않습니다: {exc}")
             return 0.0
 
+    if artifacts and bridge.get("has_runtime_llm_failure", lambda _: False)(artifacts):
+        st.error("CLOVA 호출에 실패하여 검수가 완료되지 않았습니다. 연결 및 API 설정을 확인한 뒤 목록에서 '검수 진행'을 눌러 재시도하세요. 실패 기록은 보존됩니다.")
+        return 0.0
+
     if not artifacts or not artifacts.get("summary_after_path") or not Path(artifacts["summary_after_path"]).is_file():
         st.error("현재 문서의 판정 요약이 없어 검수를 중단했습니다. 이전 결과로 대체하지 않습니다.")
         return 0.0
@@ -913,7 +920,7 @@ def _render_topbar(*, show_gmail: bool = True) -> None:
     with brand_col:
         st.markdown(
             f"""
-            <div class="topbar-brand-block">
+            <div class="topbar-brand-block" data-app-version="{APP_CACHE_VERSION}">
               <div class="brand-wrap">
                 <div class="agency-logo-strip">{logo_strip}</div>
                 <div>
@@ -1592,6 +1599,8 @@ def _status_record_for_doc(doc: InboxDocument, index: dict) -> dict | None:
         return None
     if exact.get("rule_fingerprint") != policy_fingerprint():
         return None
+    if exact.get("extraction_fingerprint") != extraction_fingerprint():
+        return None
     current = resolve_submission_permits(_related_permit_files(doc.path), doc.company, doc.product)
     if exact.get("permit_fingerprint") != current.fingerprint:
         return None
@@ -1624,6 +1633,9 @@ def _judgement_status_for_doc(doc: InboxDocument) -> dict:
 
     if not is_same_file:
         return {"state": "running" if is_running else "pending", "summary": None, "updated_at": ""}
+
+    if record.get("status") == "failed":
+        return {"state": "failed", "summary": None, "updated_at": str(record.get("updated_at", ""))}
 
     raw_summary = record.get("summary_counts")
     if not isinstance(raw_summary, dict):
@@ -1658,6 +1670,8 @@ def _judgement_status_for_doc(doc: InboxDocument) -> dict:
 
 def _review_status_html(status: dict) -> str:
     state = status.get("state")
+    if state == "failed":
+        return '<b class="review-status pending">검수 오류 · 재시도 필요</b>'
     if state == "completed":
         return '<b class="review-status completed">검수 완료</b>'
     if state == "completed_legacy":

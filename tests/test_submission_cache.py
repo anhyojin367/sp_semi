@@ -7,6 +7,20 @@ import sp_app as app
 import sp_judgement_bridge as bridge
 
 
+def test_topbar_exposes_release_marker_without_changing_visible_title(monkeypatch):
+    from contextlib import nullcontext
+
+    rendered = []
+    monkeypatch.setattr(app, "_init_gmail_state", lambda: None)
+    monkeypatch.setattr(app, "ORG_LOGO_DOMAINS", {})
+    monkeypatch.setattr(app, "st", SimpleNamespace(
+        session_state={}, container=lambda: nullcontext(),
+        markdown=lambda value, **kwargs: rendered.append(value)))
+    app._render_topbar(show_gmail=False)
+    assert f'data-app-version="{app.APP_CACHE_VERSION}"' in rendered[0]
+    assert '<div class="brand-title">SP 문서 AI 자동검토 시스템</div>' in rendered[0]
+
+
 def test_upload_selection_survives_relative_path_callback(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     pdf = tmp_path / "sp.pdf"
@@ -40,10 +54,11 @@ def test_status_requires_current_rules_permits_and_details(monkeypatch, tmp_path
     monkeypatch.setattr(app, "resolve_submission_permits", lambda *a: SimpleNamespace(fingerprint="permit-new"))
     monkeypatch.setattr(app, "resolve_domain_detail_profile", lambda *a: SimpleNamespace(fingerprint="detail-new"))
     entry = {"cache_version": app.JUDGEMENT_STATUS_CACHE_VERSION, "rule_fingerprint": "rules-new",
-             "permit_fingerprint": "permit-new", "detail_fingerprint": "detail-new"}
+             "permit_fingerprint": "permit-new", "detail_fingerprint": "detail-new",
+             "extraction_fingerprint": app.extraction_fingerprint()}
     index = {"documents": {app._pdf_status_key(pdf): entry}}
     assert app._status_record_for_doc(doc, index) is entry
-    for field in ("rule_fingerprint", "permit_fingerprint", "detail_fingerprint"):
+    for field in ("rule_fingerprint", "permit_fingerprint", "detail_fingerprint", "extraction_fingerprint"):
         original = entry[field]
         entry[field] = "old"
         assert app._status_record_for_doc(doc, index) is None
@@ -58,11 +73,41 @@ def test_identical_names_in_separate_submissions_have_distinct_cache_keys(tmp_pa
     assert bridge._artifact_key(a, [], None) != bridge._artifact_key(b, [], None)
 
 
+def test_api_failure_does_not_become_completed_from_nonempty_counts(monkeypatch, tmp_path):
+    pdf = tmp_path / "sp.pdf"
+    pdf.write_bytes(b"dummy")
+    stat = pdf.stat()
+    entry = {"status": "failed", "summary_counts": {"pass": 26, "fail": 1, "hold": 104, "total": 131},
+             "pdf_sig": {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns}}
+    monkeypatch.setattr(app, "st", SimpleNamespace(session_state={}))
+    monkeypatch.setattr(app, "_load_judgement_status_index", lambda: {})
+    monkeypatch.setattr(app, "_status_record_for_doc", lambda *args: entry)
+    status = app._judgement_status_for_doc(SimpleNamespace(path=pdf))
+    assert status["state"] == "failed" and status["summary"] is None
+    assert "검수 오류" in app._review_status_html(status)
+    assert "검수 완료" not in app._review_status_html(status)
+    assert app._review_summary_html(status) == ""
+
+
+@pytest.mark.parametrize("metadata", [
+    {"llm_call_count": 104, "llm_success_count": 0, "llm_last_error": "Connection error."},
+    {"llm_call_count": 104, "llm_success_count": 103},
+])
+def test_final_page_cannot_present_api_failure_as_document_holds(monkeypatch, tmp_path, metadata):
+    errors = []
+    slot = SimpleNamespace(markdown=lambda *a, **k: None, empty=lambda: None)
+    monkeypatch.setattr(bridge, "st", SimpleNamespace(empty=lambda: slot, error=errors.append, button=lambda *a, **k: False))
+    artifacts = {"after_result": SimpleNamespace(metadata=metadata)}
+    monkeypatch.setattr(bridge, "ensure_judgement_artifacts", lambda **kwargs: artifacts)
+    bridge.render_final_judgement_page(selected_doc=SimpleNamespace(path=tmp_path / "sp.pdf"), original_csv_dir=None)
+    assert len(errors) == 1 and "CLOVA" in errors[0] and "재시도" in errors[0]
+
+
 def test_pdf_product_field_takes_precedence_over_filename():
     assert app._extract_product("제 품 명\n다른제품주\n제조번호\n123", "스카이코비원.pdf") == "다른제품주"
 
 
-@pytest.mark.parametrize("failure", ["exception", "missing_summary", "unknown_document"])
+@pytest.mark.parametrize("failure", ["exception", "missing_summary", "unknown_document", "llm_failure"])
 def test_simulation_never_substitutes_static_results_on_error(monkeypatch, tmp_path, failure):
     pdf = tmp_path / "sp.pdf"
     pdf.write_bytes(b"test")
@@ -78,6 +123,8 @@ def test_simulation_never_substitutes_static_results_on_error(monkeypatch, tmp_p
         received.extend(kwargs["permit_paths"])
         if failure == "exception":
             raise ValueError("Invalid MD")
+        if failure == "llm_failure":
+            return {"after_result": SimpleNamespace(metadata={"llm_last_error": "Connection error."})}
         return {"runtime_csv_dir": tmp_path}
 
     from concurrent.futures import Future
@@ -88,10 +135,13 @@ def test_simulation_never_substitutes_static_results_on_error(monkeypatch, tmp_p
         except Exception as exc:
             future.set_exception(exc)
         return SimpleNamespace(future=future)
-    monkeypatch.setattr(app, "_load_judgement_bridge", lambda: {"get_judgement_job": generate_job})
+    monkeypatch.setattr(app, "_load_judgement_bridge", lambda: {
+        "get_judgement_job": generate_job, "has_runtime_llm_failure": bridge._has_runtime_llm_failure})
     monkeypatch.setattr(app, "get_simulation_job", lambda *a, **k: pytest.fail("Static CSV must not be rendered"))
     assert app._render_inline_simulation("제품", pdf) == 0.0
     assert errors
+    if failure == "llm_failure":
+        assert "CLOVA" in errors[0]
     if failure != "unknown_document":
         assert received == [missing_permit], "Missing linked permits must not silently become no permit"
 

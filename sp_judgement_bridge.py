@@ -28,6 +28,7 @@ from sp_pdf_judger.domain_details import resolve_domain_detail_profile
 from sp_pdf_judger.permit_catalog import resolve_submission_permits as resolve_permits
 from sp_pdf_judger.pipeline import DocumentJudgePipeline
 from sp_pdf_judger.policy_engine import policy_fingerprint
+from sp_pdf_judger.extraction_runtime import extraction_fingerprint
 from sp_pdf_judger.stage_csv_exporter import (
     _is_albumin_document,
     _write_export_summary_csv,
@@ -55,7 +56,7 @@ JUDGE_COMPONENT_HEIGHT = 10000
 FINAL_JUDGEMENT_VIEWPORT_HEIGHT = 860
 JUDGEMENT_STATUS_DIR = Path(__file__).resolve().parent / ".sp_judgement_status"
 JUDGEMENT_STATUS_INDEX = JUDGEMENT_STATUS_DIR / "status_index.json"
-JUDGEMENT_CACHE_VERSION = "sp-app-direct-bridge-v104-20260929-negative-result"
+JUDGEMENT_CACHE_VERSION = "sp-app-direct-bridge-v105-portable-extraction"
 _RETRY_REQUEST_SESSION_KEY = "sp_explicit_review_retry"
 
 
@@ -159,6 +160,7 @@ def _artifact_key(
 
     raw = (
         f"{JUDGEMENT_CACHE_VERSION}::"
+        f"{extraction_fingerprint()}::"
         f"{_file_sig(pdf_path)}::"
         f"{permit_sig}::"
         f"{csv_sig}::"
@@ -576,6 +578,7 @@ def _remember_judgement_artifacts(artifacts: dict[str, Any]) -> None:
         "permit_policy_id": artifacts.get("permit_policy_id"),
         "permit_fingerprint": str(artifacts.get("permit_fingerprint") or ""),
         "rule_fingerprint": str(artifacts.get("rule_fingerprint") or ""),
+        "extraction_fingerprint": str(artifacts.get("extraction_fingerprint") or ""),
         "permit_resolution_errors": list(artifacts.get("permit_resolution_errors", []) or []),
         "permit_extraction_diagnostics": list(artifacts.get("permit_extraction_diagnostics", []) or []),
         "company": str(artifacts.get("company") or ""),
@@ -1550,6 +1553,7 @@ def _ensure_disk_artifacts(*, key, root_dir, pdf_path, resolved_permit_paths,
         "product": product,
         "detail_fingerprint": detail_profile.fingerprint,
         "rule_fingerprint": policy_fingerprint(),
+        "extraction_fingerprint": extraction_fingerprint(),
         "detail_sources": detail_profile.sources,
     }
 
@@ -2212,6 +2216,10 @@ def render_final_judgement_page(
         st.error(f"판정 생성에 실패했습니다. 이전 결과로 대체하지 않습니다: {exc}")
         return
     progress_slot.empty()
+
+    if _has_runtime_llm_failure(artifacts):
+        st.error("CLOVA 호출 실패로 최종 판정이 완료되지 않았습니다. 연결 및 API 설정을 확인한 뒤 첫 화면의 '검수 진행'으로 재시도하세요. 실패 기록은 보존됩니다.")
+        return
 
     result = artifacts["after_result"]
 
