@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from scripts.prove_required_test_policies import draw_pdf
+from scripts.reviewed_test_fixture import copy_reviewed_permit
 from scripts.validate_corpus import engine_fingerprint
 from sp_pdf_judger.extractor import extract_records
 from sp_pdf_judger.policy_engine import PolicyContext, RuleBook, evaluate_policies
@@ -27,9 +28,7 @@ def run_proof(output, font):
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
     permit = output / "permit.pdf"
-    # Byte-identical with the previously reviewed synthetic permit fixture.
-    draw_pdf(permit, ["1. 제조방법 및 시험기준", "1.1. 원액", "1.1.1. 무균시험",
-        "균이 없어야 한다.", "1.1.2. 함량시험", "90 이상이어야 한다.", "2. 안내"], font)
+    copy_reviewed_permit(permit)
     report = {"engine_fingerprint": engine_fingerprint(), "llm_calls": 0, "cases": {}}
     for case, expected in CASES.items():
         multi = case.startswith("multi_batch") or case == "unbound_multi_batch"

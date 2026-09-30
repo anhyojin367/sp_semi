@@ -19,7 +19,32 @@ Linux/Python 3.14.7 wheel 전용 설치계획 검사, Python 3.10 설치계획 �
 3.14에서 새로 추출한 D00~D16은 기존 3.10 hybrid 결과와 **17/17 일치**했다
 (시험값·MD 상태·개별 판정·집계 및 기대 오류 누락 0; CLOVA 호출 0).
 근거는 `.local_validation/deploy_314/comparison.json`이다.
-전체 회귀시험 및 클라우드 실제 실행 확인은 별도 완료 기록과 구별한다.
+최종 전체 회귀시험은 **1,659 passed / 7 skipped / 실패 0 (287.74초)**이다.
+7개 skip은 기존 미구현 단계 재개 계약이며 이번 호환 수정으로 완료한 것이 아니다.
+근거는 `.local_validation/deploy_314/full_suite_final.xml`이다.
+새 3.14 앱의 홈, 업로드 창, HTML v106 마커도 확인했다.
+이 로컬 결과와 클라우드 실제 실행 확인은 구별한다.
+
+Windows 회귀시험은 프로젝트 내 짧고 고유한 임시 경로를 지정한다.
+깊은 시험 폴더에 긴 업로드 파일명/OCR 캐시 해시가 겹치면 Windows 경로
+길이 제한으로 실패할 수 있다. 이번 호환 수정은 임의 길이의 Windows 경로
+지원을 추가한 것이 아니며, OS의 보안/긴 경로 설정은 변경하지 않았다.
+
+### 합성 회귀시험 허가서의 재현성
+
+검토 완료된 MD 예제는 허가서의 **PDF 파일 SHA-256**에 바인딩된다.
+같은 문장을 ReportLab으로 다시 그려도 Python/zlib가 달라지면 PDF 바이트가
+달라질 수 있으며, 이 경우 기존 MD가 그 문서를 거부하는 것은 정상이다.
+시험을 통과시키려고 문서 해시 검사를 끄거나 MD 해시를 새 값으로 바꾸지 않았다.
+
+- `tests/fixtures/reviewed_required_test_permit.pdf`: 필수 시험·배치·시험 범위 예제가 검토한 합성 허가서.
+- `tests/fixtures/reviewed_applicability_permit.pdf`: 조건부 적용 예제가 검토한 합성 허가서.
+- `scripts/reviewed_test_fixture.py`: 두 fixture의 기존 해시를 확인한 뒤 시험용 출력 폴더에 복사한다.
+- `scripts/prove_*` 중 해당 예제 4개만 이 파일들을 쓴다. 제출 SP, 수정 허가서 반례,
+  실제 업로드 문서는 여전히 각 문서 자체를 읽으며 운영 파이프라인은 이 helper를 호출하지 않는다.
+
+따라서 새 환경의 회귀시험도 검토 당시와 정확히 같은 허가서 바이트를 사용한다.
+실제 허가서가 바뀌면 다시 검토해야 한다는 운영 원칙은 유지된다.
 
 참고: [Streamlit 3.14 호환 수정](https://docs.streamlit.io/develop/quick-reference/release-notes/2026),
 [Camelot 1.0.9 배포 메타데이터](https://pypi.org/project/camelot-py/1.0.9/).

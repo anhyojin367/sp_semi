@@ -17,6 +17,7 @@ from reportlab.pdfgen.canvas import Canvas
 from sp_pdf_judger.extractor import extract_records
 from sp_pdf_judger.policy_engine import PolicyContext, RuleBook, evaluate_policies
 from scripts.validate_corpus import engine_fingerprint
+from scripts.reviewed_test_fixture import copy_reviewed_permit
 
 
 RULES = ROOT / "docs" / "examples" / "required_test_rules"
@@ -69,7 +70,9 @@ def run_proof(output, font_path):
                    "균이 없어야 한다.", "1.1.2. 함량시험", "90 이상이어야 한다.", "2. 안내"]
     permit = output / "permit.pdf"
     revised = output / "permit_conditional.pdf"
-    draw_pdf(permit, permit_rows, font_path)
+    # The MD pins reviewed PDF bytes, not just its visible text. Regenerating it
+    # with a different Python/zlib version legitimately invalidates that pin.
+    copy_reviewed_permit(permit)
     draw_pdf(revised, [row.replace("균이 없어야 한다.", "재시험인 경우에만 실시한다. 균이 없어야 한다.")
                        for row in permit_rows], font_path)
     book = RuleBook(RULES)
