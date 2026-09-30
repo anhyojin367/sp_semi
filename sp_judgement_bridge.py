@@ -56,7 +56,7 @@ JUDGE_COMPONENT_HEIGHT = 10000
 FINAL_JUDGEMENT_VIEWPORT_HEIGHT = 860
 JUDGEMENT_STATUS_DIR = Path(__file__).resolve().parent / ".sp_judgement_status"
 JUDGEMENT_STATUS_INDEX = JUDGEMENT_STATUS_DIR / "status_index.json"
-JUDGEMENT_CACHE_VERSION = "sp-app-direct-bridge-v105-portable-extraction"
+JUDGEMENT_CACHE_VERSION = "sp-app-direct-bridge-v106-python314-runtime"
 _RETRY_REQUEST_SESSION_KEY = "sp_explicit_review_retry"
 
 

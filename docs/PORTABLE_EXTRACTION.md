@@ -1,4 +1,28 @@
-# PDF 표 추출 이식성·긴 문서 처리 (v105)
+# PDF 표 추출 이식성·긴 문서 처리 (v105/v106)
+
+## Python 3.14 배포 호환성 — v106
+
+9월 30일 사용자가 제공한 실제 Streamlit 로그에서 **Python 3.14.7**을 확인했다.
+3.10에서 검증한 패키지를 그대로 고정한 v105에는 다음 호환 문제가 있었다.
+
+- Streamlit 1.47은 3.14 대응 및 deferred-annotation 수정 전이다. 1.61.0으로 고정한다.
+- Pillow/scikit-learn/pandas/Pydantic/PyYAML을 3.14 wheel이 있는 버전으로 고정한다.
+- Camelot 1.0.9는 Python 3.12 미만에서는 pypdf 3.x, 3.12 이상에서는 4~5.x를 요구한다.
+  따라서 requirements에서 Python 조건에 따라 3.17.4/5.9.0을 선택한다.
+- 업무 판정 코드·MD·더미 PDF는 바꾸지 않는다. 이전 결과 재사용 방지를 위해
+  앱/판정 캐시는 v106이며 HTML의 `data-app-version`은
+  `sp-ui-cache-v106-python314-runtime`이다.
+
+격리된 Windows/Python 3.14.7 설치와 의존성 검사, 홈/업로드 창 기동 확인,
+Linux/Python 3.14.7 wheel 전용 설치계획 검사, Python 3.10 설치계획 검사를 수행했다.
+설치계획 검사는 Linux에서 앱 전체를 실행했다는 뜻이 아니다.
+3.14에서 새로 추출한 D00~D16은 기존 3.10 hybrid 결과와 **17/17 일치**했다
+(시험값·MD 상태·개별 판정·집계 및 기대 오류 누락 0; CLOVA 호출 0).
+근거는 `.local_validation/deploy_314/comparison.json`이다.
+전체 회귀시험 및 클라우드 실제 실행 확인은 별도 완료 기록과 구별한다.
+
+참고: [Streamlit 3.14 호환 수정](https://docs.streamlit.io/develop/quick-reference/release-notes/2026),
+[Camelot 1.0.9 배포 메타데이터](https://pypi.org/project/camelot-py/1.0.9/).
 
 ## 배포본 사용 안내 — 2026-09-30
 
@@ -9,8 +33,8 @@ Python 3.10에서 검증했으며 `requirements.txt`의 버전과 기본 `hybrid
 업데이트 후 이전 환경의 캐시 결과는 재사용하지 않는다. 기존 문서를 선택해
 **검수 진행**을 누르거나 SP PDF와 해당 허가서를 함께 업로드한 뒤 검수한다.
 API 키는 Streamlit Secrets에만 두며 GitHub에는 올리지 않는다.
-페이지 상단 HTML의 `data-app-version`은 `sp-ui-cache-v105-portable-extraction`이다.
-이 값으로 실제 서비스가 v105인지 확인할 수 있으며 화면 배치는 바꾸지 않는다.
+v105 당시 페이지 상단 HTML의 `data-app-version`은 `sp-ui-cache-v105-portable-extraction`이었다.
+현재 v106 표시는 위 항목을 따른다. 버전 속성은 화면에 표시되지 않는다.
 
 ## 이번 변경의 목적
 
