@@ -1,14 +1,14 @@
 """Exercise actual corpus findings through the existing UI adapters, without API."""
-import json
 from dataclasses import asdict
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
-from sp_pdf_judger.extractor import _record_from_dict
+from sp_pdf_judger.pipeline import DocumentJudgePipeline
+from sp_pdf_judger.permit_catalog import ResolvedPermit, resolve_submission_permits
 from sp_pdf_judger.policy_engine import RuleBook, PolicyContext, evaluate_policies
 from sp_pdf_judger.policy_summary import manufacturing_policy_cards, summarize_manufacturing_policies
-from sp_pdf_judger.schemas import Evaluation, ProcessingResult, Summary
 from sp_pdf_judger.manufacturing_stage_ui import _norm_match
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,12 +18,16 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_corpus_findings_and_ui_use_identical_outcomes(case, monkeypatch, tmp_path):
     import sp_judgement_bridge as bridge
     import sp_pdf_judger.manufacturing_stage_ui as ui
-    path = ROOT / ".local_validation" / "integrated_offline" / f"{case}.json"
-    if not path.exists():
-        pytest.skip("Private offline corpus required")
-    raw = json.loads(path.read_text(encoding="utf-8"))
-    records = [_record_from_dict(row, i) for i, row in enumerate(raw["extracted_records"])]
-    pdf = Path(raw["pdf_path"])
+    # Fresh clones must exercise the current public PDFs, not private or stale
+    # historical JSON (D06's original filename no longer exists).
+    pdf, = (ROOT / "더미데이터").glob(f"{case}_*.pdf")
+    permits = list((ROOT / "더미데이터").glob("*허가문서*.pdf"))
+    resolution = resolve_submission_permits(permits, "동국바이오사이언스", "스카이코비원멀티주")
+    offline = ResolvedPermit(None, resolution.paths, resolution.fingerprint, resolution.errors)
+    with patch("sp_pdf_judger.llm.create_clova_client", return_value=None):
+        result = DocumentJudgePipeline(company="동국바이오사이언스", product="스카이코비원멀티주",
+                                       permit_resolution=offline).run(pdf)
+    records = result.extracted_records
     book = RuleBook()
     findings = evaluate_policies(PolicyContext(pdf, records, list((ROOT / "더미데이터").glob("*허가문서*.pdf")), "스카이코비원멀티주"), book)
     cards = manufacturing_policy_cards(findings, book, records=records)
@@ -40,10 +44,10 @@ def test_corpus_findings_and_ui_use_identical_outcomes(case, monkeypatch, tmp_pa
     status, reason, meta = summarize_manufacturing_policies(findings, book, [3])
     if case == "D08":
         assert status == "검수불합격"
-    result = ProcessingResult(pdf, Path(raw["preview_image_path"]), records,
-        [Evaluation(**row) for row in raw["evaluations"]], [], Summary(**raw["summary"]),
-        {**raw["metadata"], "manufacturing_info_cards": [asdict(card) for card in cards], "manufacturing_summary_meta": meta},
-        manufacturing_summary_status=status, manufacturing_summary_reason=reason)
+    result.metadata.update(manufacturing_info_cards=[asdict(card) for card in cards],
+                           manufacturing_summary_meta=meta)
+    result.manufacturing_summary_status = status
+    result.manufacturing_summary_reason = reason
     monkeypatch.setattr(ui, "validate_manufacturing_info_consistency", lambda *a, **k: pytest.fail("Legacy re-judgement"))
     html = ui.render_manufacturing_summary_with_stage_cards(result)
     assert 'class="mfg-compact-card' in html and "제조번호" in html
