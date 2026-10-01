@@ -651,7 +651,9 @@ class DocumentJudgePipeline:
         detail_profile = self._activate_detail_profile(static_result)
         # Reload on every run: editing a Markdown policy must affect the next judgement.
         rule_book = RuleBook(self.rule_dir) if self.rule_dir else RuleBook()
-        search_aliases = rule_book.search_alias_groups(self.product)
+        from .rule_profile import resolve_rule_product
+        rule_product, rule_profile_audit = resolve_rule_product(self.product, self.permit_store, rule_book)
+        search_aliases = rule_book.search_alias_groups(rule_product)
         self.permit_store.configure_search_aliases(search_aliases)
         artifact_stem = _pdf_artifact_stem(pdf_path)
         work_root = ensure_dir(Path(tempfile.gettempdir()) / "sp_pdf_judger_preview")
@@ -716,8 +718,8 @@ class DocumentJudgePipeline:
                 evaluations.append(priority_eval)
                 priority_general_applied.extend(priority_meta.get("applied", []))
                 continue
-            normalized = normalize_record_units(record, rule_book, self.product)
-            normalized, result_alias = normalize_record_result(normalized, rule_book, self.product)
+            normalized = normalize_record_units(record, rule_book, rule_product)
+            normalized, result_alias = normalize_record_result(normalized, rule_book, rule_product)
             evaluation = self.judge_engine.judge_record(normalized)
             if result_alias:
                 result_normalizations.append(result_alias)
@@ -760,7 +762,7 @@ class DocumentJudgePipeline:
 
         next_order_idx = max((getattr(record, "order_idx", 0) for record in records), default=0) + 1
         policy_context = PolicyContext(pdf_path, records,
-            self.permit_store.permit_pdf_paths, self.product, self.llm_client,
+            self.permit_store.permit_pdf_paths, rule_product, self.llm_client,
             comparison_bases=self.judge_engine.comparison_bases,
             permit_authoritative=bool(self.judge_engine.permit_policy and self.judge_engine.permit_policy.authoritative),
             permit_search_aliases=search_aliases, company=self.company)
@@ -847,6 +849,8 @@ class DocumentJudgePipeline:
                 ],
                 "document_company": detail_profile.requested_company,
                 "document_product": detail_profile.requested_product,
+                "rule_profile": rule_profile_audit,
+                "requirement_catalog": [r.model_dump() for r in rule_book.requirements],
                 "domain_detail_matched_company": detail_profile.matched_company,
                 "domain_detail_matched_product": detail_profile.matched_product,
                 "domain_detail_sources": detail_profile.sources,

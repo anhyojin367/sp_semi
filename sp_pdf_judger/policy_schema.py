@@ -64,6 +64,16 @@ class NoParams(StrictModel):
     pass
 
 
+class Requirement(StrictModel):
+    """Retained user requirement, distinct from an executed verdict/count."""
+    id: Annotated[Text, Field(pattern=r"^(?:[ABC]\.\d+|G\d{2})$")]
+    instruction: Text
+    rule_ids: list[Text] = Field(default_factory=list)
+    components: list[Text] = Field(default_factory=list)
+    coverage: Literal["active", "partial", "requires_reference"]
+    scope: Text
+
+
 class VersionParams(StrictModel):
     pattern: Pattern = r"Ver\.?\s*([\d.]+)\s*\(([^)]+)\)"
 
@@ -347,7 +357,7 @@ def load_frontmatter(text):
         raise ValueError(f"Invalid MD YAML: {exc}") from exc
     if not isinstance(value, dict) or not isinstance(value.get("rules"), list):
         raise ValueError("Rule list missing")
-    unknown = set(value) - {"rules", "permit_search_aliases", "result_aliases"}
+    unknown = set(value) - {"rules", "permit_search_aliases", "result_aliases", "requirements"}
     if unknown:
         raise ValueError(f"Unknown MD root fields: {sorted(map(str, unknown))}")
     return value

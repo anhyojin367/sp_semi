@@ -4217,10 +4217,10 @@ def render_manufacturing_info_validation_card(
         date_failures = sum(item.status == "불합격" for item in result.test_dates)
         date_holds = sum(item.status == "보류" for item in result.test_dates)
         date_summary = (
-            f"시험일 {len(result.test_dates)}건 확인"
-            f" · 합격 {date_passes}"
-            f" · 불합격 {date_failures}"
-            f" · 확인 필요 {date_holds}"
+            f"시험일만 {len(result.test_dates)}건"
+            f" · 시험일 충족 {date_passes}"
+            f" · 시험일 불충족 {date_failures}"
+            f" · 시험일 보류 {date_holds}"
         )
         stage_class = {
             "합격": "pass",
@@ -4229,9 +4229,9 @@ def render_manufacturing_info_validation_card(
         if stage_class == "pass":
             stage_status = "전체 일치"
         elif stage_class == "hold":
-            stage_status = f"확인 필요 {issue_count}건"
+            stage_status = f"정보·시험일 확인 필요 {issue_count}건"
         else:
-            stage_status = f"불일치 {issue_count}건"
+            stage_status = f"정보·시험일 불일치 {issue_count}건"
         baseline_values: dict[str, str] = {}
         for field in result.fields:
             if field.summary_value and field.field_name not in baseline_values:
@@ -4248,7 +4248,7 @@ def render_manufacturing_info_validation_card(
                     <div>
                         <div class="mfg-stage-name">{html.escape(result.stage_name)}</div>
                         <div class="mfg-stage-meta">
-                            본문 출처 {result.source_count}곳 · {date_summary}
+                            본문 출처 {result.source_count}곳 · {date_summary}<br>아래 상세 규칙과 같은 점검 결과이며 별도 오류로 중복 집계하지 않습니다.
                         </div>
                     </div>
                     <span class="mfg-stage-status {stage_class}">{stage_status}</span>

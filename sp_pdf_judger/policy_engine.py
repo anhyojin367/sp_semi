@@ -19,7 +19,7 @@ from .schemas import Evaluation, ExtractedRecord
 from .permit_catalog import PermitPolicy
 from .permit_pdf_store import PermitPdfStore
 from .policy_criteria import resolve_criterion
-from .policy_schema import RuleSelector, Text, load_frontmatter, validate_params
+from .policy_schema import Requirement, RuleSelector, Text, load_frontmatter, validate_params
 from .policy_time import complete_timestamp, complete_duration_seconds, seconds_text
 from .table_values import field_values, material_rows
 
@@ -122,6 +122,7 @@ class Rule(BaseModel):
     products: list[Text] = Field(default_factory=list)
     report_group: Literal["manufacturing_dates", "manufacturing_info"] | None = None
     criterion_source: Literal["sp", "permit_first"] = "sp"
+    depends_on: dict[Text, Text] = Field(default_factory=dict)
     _applicability_path: Path | None = PrivateAttr(default=None)
     _applicability_sha256: str = PrivateAttr(default="")
 
@@ -206,6 +207,7 @@ class RuleBook:
         self.rules = []
         self.permit_search_aliases = []
         self.result_aliases = []
+        self.requirements = []
         digest = hashlib.sha256()
         for path in sorted(Path(root).glob("**/*.md")):
             if path.relative_to(root).parts[0] == "_conditions":
@@ -228,6 +230,10 @@ class RuleBook:
             digest.update(path.relative_to(root).as_posix().encode())
             digest.update(raw.encode())
             self.rules.extend(rules)
+            requirements = data.get("requirements", [])
+            if not isinstance(requirements, list):
+                raise ValueError(f"requirements must be a list: {path.name}")
+            self.requirements.extend(Requirement.model_validate(item) for item in requirements)
             aliases = data.get("permit_search_aliases", [])
             if not isinstance(aliases, list):
                 raise ValueError(f"permit_search_aliases must be a list: {path.name}")
@@ -249,7 +255,19 @@ class RuleBook:
             raise ValueError("No executable Markdown rules found")
         if len(ids) != len(set(ids)):
             raise ValueError("Duplicate rule IDs")
+        requirement_ids = [r.id for r in self.requirements]
+        if len(requirement_ids) != len(set(requirement_ids)):
+            raise ValueError("Duplicate requirement IDs")
+        for requirement in self.requirements:
+            if set(requirement.rule_ids) - set(ids):
+                raise ValueError(f"Unknown rule binding for requirement {requirement.id}")
+        if requirement_ids:
+            for rule in self.rules:
+                if set(rule.aliases) - set(requirement_ids):
+                    raise ValueError(f"Unknown requirement alias: {rule.id}")
         for rule in self.rules:
+            if rule.id in rule.depends_on or set(rule.depends_on) - set(ids):
+                raise ValueError(f"Invalid dependency: {rule.id}")
             if rule.operation not in OPERATIONS:
                 raise ValueError(f"Unknown operation: {rule.id}: {rule.operation}")
             if rule.operation == "permit_conditional_tests":
@@ -391,17 +409,26 @@ def diagram_consistency(rule, ctx):
 
 def required_tests(rule, ctx):
     records = ctx.select(rule.selector)
+    stage = " / ".join(rule.selector.get("context", [])) or "대상 제조단계"
+    required = rule.params["tests"]
+    evidence = [ctx.evidence(r) for r in records]
     if not records:
-        return finding(rule, "FAIL", "대상 제품의 필수 제조단계 또는 시험 전체가 누락되었습니다.",
-            [{"source": "sp", "file": str(ctx.pdf_path), "page": 1,
-              "quote": "전체 추출 레코드에서 필수 제조단계를 검색했으나 찾지 못함"}], searched_selector=rule.selector)
+        # Absence has no source page. Cite an actual diagram node, not a
+        # fabricated first-page quote; retain the searched scope separately.
+        for row in getattr(ctx, "records", []):
+            nodes = (row.diagram_data or {}).get("nodes", [])
+            if any(norm(stage) in norm(node.get("name")) for node in nodes):
+                evidence.append(ctx.evidence(row))
+        return finding(rule, "FAIL", f"{stage}: 본문의 필수 제조단계/시험 기록이 없습니다. 누락 시험: {', '.join(required)}.",
+            evidence, searched_selector=rule.selector, missing_tests=required,
+            searched_pages=[page for page, _ in getattr(ctx, "pages", [])])
     # Joining names invents identities across adjacent records (or between a
     # test name and its parent). A heading alone is not evidence of a test.
     names = [norm(name) for r in records if r.record_type == "test"
              for name in (r.test_name, r.parent_test_group) if name]
-    required = rule.params["tests"]
     missing = [name for name in required if not any(norm(name) in actual for actual in names)]
-    return outcome(rule, [f"필수 시험 누락: {name}" for name in missing], [ctx.evidence(r) for r in records], len(required))
+    return outcome(rule, [f"{stage} 필수 시험 누락: {name}" for name in missing], evidence,
+                   len(required), missing_tests=missing, searched_selector=rule.selector)
 
 
 def duration(rule, ctx):
@@ -420,7 +447,7 @@ def duration(rule, ctx):
         actual = (parsed[-1] - parsed[0]).days + int(rule.params.get("inclusive", False))
         checked += 1
         if actual < rule.params["minimum_days"]:
-            reason = f"{r.test_name}: {actual}일, 최소 {rule.params['minimum_days']}일 필요"
+            reason = f"{r.test_name}: {parsed[0]} ~ {parsed[-1]} = {actual}일, 최소 {rule.params['minimum_days']}일 필요"
             violations.append(reason)
             if r.record_type == "test":
                 guards.append({"order_idx": r.order_idx, "status": "검수불합격", "reason": reason,
@@ -545,6 +572,7 @@ def storage_window(rule, ctx):
     errors, checked, missing = [], 0, []
     evidence = [ctx.evidence(r) for r in sources + targets]
     deadlines = []
+    guards = []
     for source in sources:
         start = complete_dates(unique_field_value(source, "제조년월일"), count=1)
         deadline = month_deadline(start[0] if start else None, unique_field_value(source, "허가된 저장기간"))
@@ -561,8 +589,12 @@ def storage_window(rule, ctx):
             for actual in actual_dates:
                 checked += 1
                 if actual > deadline:
-                    errors.append(f"{target.test_name or target.section_title} {actual}이 저장기한 {deadline}을 초과합니다.")
-    return outcome(rule, errors, evidence, checked, missing=missing)
+                    reason = f"{target.test_name or target.section_title} {actual}이 저장기한 {deadline}을 초과합니다."
+                    errors.append(reason)
+                    if target.record_type == "test":
+                        guards.append({"order_idx": target.order_idx, "status": "검수불합격",
+                                       "reason": reason, "comparator": "md_storage_window"})
+    return outcome(rule, errors, evidence, checked, missing=missing, test_guards=guards)
 
 
 def mass_balance(rule, ctx):
@@ -599,7 +631,11 @@ def mass_balance(rule, ctx):
     return outcome(rule, errors, evidence, checked, missing=missing)
 
 
-_QUANTITY = re.compile(r"(?P<number>\d+(?:\.\d+)?)(?:\s*[x×]\s*10\^?\d+)?\s*(?P<unit>cells/mL|CFU/mL|PFU/mL|EU/mL|IU/mL|[μµu]g/mg|ng/mg|pg/[μµu]L|[μµu]g/mL|nm|%)", re.I)
+_QUANTITY = re.compile(
+    r"(?P<number>\d+(?:\.\d+)?)(?:\s*[x×]\s*10\^?\d+)?\s*"
+    r"(?P<unit>(?:EU|IU|[μµu]g|ng)/mg(?:\s+of\s+protein)?|"
+    r"cells/mL|CFU/mL|PFU/mL|EU/mL|IU/mL|pg/[μµu]L|[μµu]g/mL|nm|%)"
+    r"(?![A-Za-z/])", re.I)
 
 
 def precision(rule, ctx):
@@ -644,7 +680,8 @@ def permit_field(rule, ctx):
         for match in re.finditer(pattern, text, re.S):
             if not norm(match[1]):
                 continue
-            candidates.append((norm(match[1]), {"source": "permit", "file": file, "page": page, "quote": match.group(0)}))
+            candidates.append((norm(match[1]), {"source": "permit", "file": file, "page": page,
+                                               "quote": match.group(0), "value": match[1].strip()}))
     for r in records:
         evidence.append(ctx.evidence(r))
         value = field_value(r, rule.params["sp_field"])
@@ -660,7 +697,8 @@ def permit_field(rule, ctx):
         checked += 1
         evidence.extend(e for _, e in candidates)
         if not any(norm(value) == candidate for candidate, _ in candidates):
-            errors.append(f"SP {rule.params['sp_field']} '{value}'가 연결된 허가서와 일치하지 않습니다.")
+            permit_value = re.sub(r"\s+", " ", candidates[0][1]["value"])
+            errors.append(f"{rule.params['sp_field']} 불일치: SP '{value}' / 허가서 '{permit_value}'.")
     return outcome(rule, errors, evidence, checked, missing=missing)
 
 
@@ -811,7 +849,7 @@ def normalize_record_units(record, book, product=""):
             continue
         for mapping in rule.params.get("unit_aliases", []):
             if norm(mapping["test"]) in norm(record.test_name):
-                pattern = re.escape(mapping["from"]) + r"(?![A-Za-z])"
+                pattern = r"(?<![A-Za-z/])" + re.escape(mapping["from"]).replace(r"\ ", r"\s+") + r"(?![A-Za-z/]|\s*/)"
                 criteria = re.sub(pattern, mapping["to"], criteria or "", flags=re.I)
                 result = re.sub(pattern, mapping["to"], result or "", flags=re.I)
     return replace(record, criteria=criteria, result=result)
@@ -965,6 +1003,15 @@ def evaluate_policies(ctx, book=None):
             continue
         try:
             result = OPERATIONS[rule.operation](rule, ctx)
+            if rule.operation in {"required_tests", "duration"}:
+                # Attach only matching stage/test paragraphs from the linked
+                # permit. The approved MD obligation is still the comparator.
+                names = rule.params.get("tests", [rule.selector.get("test", "")])
+                for chunk in getattr(getattr(ctx, "permit_store", None), "chunks", []):
+                    if (all(norm(stage) in norm(chunk.normalized_stage_path) for stage in rule.selector.get("context", []))
+                            and any(name and norm(name) in norm(chunk.title) for name in names)):
+                        result.evidence.append({"source": "permit", "file": chunk.source_file,
+                                                "page": chunk.page_number, "quote": chunk.text})
             # These pure operators compare independent records. Locate only the
             # proven failing records, never apply a group failure to every test.
             # Zero comparisons can be N/A at the row level, so do not propagate
@@ -987,6 +1034,20 @@ def evaluate_policies(ctx, book=None):
             findings.append(result)
         except Exception as exc:
             findings.append(finding(rule, "HOLD", f"규칙 실행 오류: {type(exc).__name__}", execution_error=True))
+    by_id = {item.rule_id: item for item in findings}
+    for rule in book.rules:
+        current = by_id[rule.id]
+        if current.status != "HOLD":
+            continue
+        for dependency, scope in rule.depends_on.items():
+            parent = by_id.get(dependency)
+            if (parent and parent.status == "FAIL" and
+                    (norm(scope) in norm(current.reason) or norm(scope) in norm(" ".join(rule.selector.get("context", []))))):
+                current.details.setdefault("blocked_by", []).append(dependency)
+                current.reason = f"{dependency}의 {scope} 누락으로 비교 근거가 없어 확인 불가. " + current.reason
+                for check in current.details.get("manufacturing_checks", []):
+                    if check.get("status") == "보류" and norm(scope) in norm(check.get("stage_name")):
+                        check["reason"] = f"{dependency} 공정 누락으로 확인 불가. " + check["reason"]
     return findings
 
 
@@ -1000,7 +1061,11 @@ def to_evaluations(findings, book, start_order):
         category = (f.aliases or [f.rule_id])[0][:1]
         kind = {"B": "numeric_precision_validation", "C": "temporal_sequence_validation"}.get(category, "structural_validation")
         pages = [e["page"] for e in f.evidence if e.get("source") == "sp" and e.get("page")]
-        reason = f.reason + "\n" + "\n".join(f"{e['source']} p.{e['page']}: {e['quote'][:240]}" for e in f.evidence[:4])
+        # Full source quotes are retained in policy_audit and its evidence links.
+        # Do not append unrelated, mid-word-truncated tables to the verdict.
+        references = list(dict.fromkeys(f"{e['source']} p.{e['page']}" for e in f.evidence
+                                       if e.get("source") and e.get("page")))
+        reason = f.reason + ("\n근거 위치: " + ", ".join(references) if references else "")
         result.append(Evaluation(order_idx=start_order + len(result), record_type=kind,
             section_number=f.rule_id, section_title="MD 규칙 검증", test_name=f.title,
             criteria=rule.instruction, result=f.reason, reason=reason,

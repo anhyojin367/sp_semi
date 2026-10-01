@@ -16,15 +16,20 @@ def apply_policy_test_guards(evaluations, findings):
     for finding in findings:
         for guard in finding.details.get("test_guards", []):
             evaluation = by_order.get(guard["order_idx"])
-            if evaluation is None or evaluation.final_status == FAIL_LABEL or guard["status"] not in {FAIL_LABEL, HOLD_LABEL}:
+            if evaluation is None or guard["status"] not in {FAIL_LABEL, HOLD_LABEL}:
+                continue
+            # Keep every proven failure, but never let a missing-evidence guard
+            # downgrade one. Prior numeric PASS prose belongs in the audit only.
+            if evaluation.final_status == FAIL_LABEL and guard["status"] == HOLD_LABEL:
+                continue
+            message = finding.rule_id + ": " + guard["reason"]
+            if message in (evaluation.reason or "").splitlines():
                 continue
             audit.append({"rule_id": finding.rule_id, "order_idx": evaluation.order_idx,
                 "previous_status": evaluation.final_status, "previous_reason": evaluation.reason, "previous_source": evaluation.source})
+            preceding_failure = evaluation.reason if evaluation.final_status == FAIL_LABEL else ""
             evaluation.final_status = guard["status"]
-            preceding_reason = evaluation.reason
-            evaluation.reason = finding.rule_id + ": " + guard["reason"]
-            if preceding_reason:
-                evaluation.reason += "\n결과값 비교의 종전 판정(시험 전체의 최종 판정이 아님): " + preceding_reason
+            evaluation.reason = "\n".join(part for part in (preceding_failure, message) if part)
             evaluation.source = "md_policy_guard"
             evaluation.comparator = guard.get("comparator", "md_labelled_numeric")
             evaluation.comparison_completed = guard["status"] == FAIL_LABEL

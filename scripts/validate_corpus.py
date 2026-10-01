@@ -29,10 +29,18 @@ EXPECTED_TEST_FAILURES = {
     "D05": [("CHO 제조용 세포주", "세포성장 및 증식확인시험"),
             ("Component B", "잔류 숙주세포 유래 DNA시험"),
             ("Component B", "박테리오파지부정시험")],
+    "D06": [("CHO 제조용 세포주", "세포성장 및 증식확인시험"),
+            ("E.coli 제조용 세포주", "생균수시험"),
+            ("Component B", "잔류 숙주세포 유래 단백질시험"),
+            ("나노파티클", "PH측정시험")],
+    "D07": [("항원바이알", "성상"), ("항원바이알", "PH측정시험"), ("항원바이알", "엔도톡신시험")],
+    "D09": [("CHO 마스터 세포주", "세포성장 및 증식확인시험"),
+            ("Component A 본배양액", "결핵균부정시험")],
 }
 
 # D15/D16 change notation, not the observation. They are positive controls.
 EXPECTED_TEST_PASSES = {
+    "D06": [("Component B", "엔도톡신시험", "760 IU/mg of protein")],
     "D15": [("Component A", "무균시험", "x")],
     "D16": [("Component A", "무균시험", "불검출")],
 }
@@ -61,11 +69,24 @@ def assess_result(key, result, live):
         "missing_rules": sorted(set(EXPECTED[key]) - found), "missing_test_failures": missing_tests,
         "missing_test_passes": missing_passes,
         "normal_false_positives": [e.test_name for e in result.evaluations if e.final_status == FAIL_LABEL] if key in {"D00", "D15", "D16"} else [],
-        "holds": [{"test": e.test_name, "section": e.section_title, "reason": e.reason}
+        "holds": [{"test": e.test_name, "section": e.section_title, "reason": e.reason, "rule_id": e.section_number}
                   for e in result.evaluations if e.final_status == HOLD_LABEL],
         "completed_at": datetime.now(timezone.utc).isoformat()}
     audit["live_acceptance_complete"] = bool(live and result.metadata.get("llm_success_count")
-        and not audit["holds"] and not audit["missing_rules"] and not missing_tests and not missing_passes and not audit["normal_false_positives"])
+        and not result.metadata.get("llm_last_error") and not audit["holds"] and not audit["missing_rules"]
+        and not missing_tests and not missing_passes and not audit["normal_false_positives"])
+    # D13 intentionally lacks the source of these six comparisons. Keep their
+    # HOLD verdicts visible; validate the causal link rather than force a PASS.
+    expected_dependencies = {"R04", "R05", "R12", "R16", "R17", "R30"} if key == "D13" else set()
+    linked = {f["rule_id"] for f in result.metadata["policy_audit"]
+              if f["status"] == "HOLD" and f.get("details", {}).get("blocked_by") == ["R29"] and "R29" in found}
+    audit["expected_dependency_holds"] = sorted(expected_dependencies)
+    audit["missing_dependency_links"] = sorted(expected_dependencies - linked)
+    audit["unexpected_holds"] = [h for h in audit["holds"] if h["rule_id"] not in expected_dependencies.intersection(linked)]
+    audit["live_contract_complete"] = bool(live and result.metadata.get("llm_success_count")
+        and not result.metadata.get("llm_last_error") and not audit["unexpected_holds"]
+        and not audit["missing_dependency_links"] and not audit["missing_rules"] and not missing_tests
+        and not missing_passes and not audit["normal_false_positives"])
     return audit
 
 
@@ -109,9 +130,11 @@ def main():
             payload = asdict(result)
             audit = assess_result(key, result, args.live)
             audit["engine_fingerprint"] = engine_version
+            audit["source_sha256"] = hashlib.sha256(pdfs[0].read_bytes()).hexdigest()
             audit["engine_changed_during_run"] = engine_fingerprint() != engine_version
             if audit["engine_changed_during_run"]:
                 audit["live_acceptance_complete"] = False
+                audit["live_contract_complete"] = False
             payload["validation"] = audit
             destination = output / f"{key}.json"
             if destination.exists():
@@ -123,7 +146,7 @@ def main():
                   "missing_passes=", audit["missing_test_passes"],
                   "normal_false_positives=", audit["normal_false_positives"],
                   "llm_calls=", result.metadata["llm_call_count"], flush=True)
-            if audit["engine_changed_during_run"] or audit["missing_rules"] or audit["missing_test_failures"] or audit["missing_test_passes"] or audit["normal_false_positives"] or (args.live and not audit["live_acceptance_complete"]):
+            if audit["engine_changed_during_run"] or audit["missing_rules"] or audit["missing_test_failures"] or audit["missing_test_passes"] or audit["normal_false_positives"] or audit["missing_dependency_links"] or (args.live and not audit["live_contract_complete"]):
                 failures.append(key)
     return bool(failures)
 

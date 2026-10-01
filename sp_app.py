@@ -40,8 +40,8 @@ DEFAULT_GMAIL_SINCE = date(2026, 1, 1)
 GMAIL_CONFIRMATION_VERSION = "manual-gmail-confirm-20260602-v2"
 JUDGEMENT_STATUS_DIR = Path(__file__).resolve().parent / ".sp_judgement_status"
 JUDGEMENT_STATUS_INDEX = JUDGEMENT_STATUS_DIR / "status_index.json"
-APP_CACHE_VERSION = "sp-ui-cache-v106-python314-runtime"
-JUDGEMENT_STATUS_CACHE_VERSION = "sp-app-direct-bridge-v106-python314-runtime"
+APP_CACHE_VERSION = "sp-ui-cache-v107-reviewed-rules"
+JUDGEMENT_STATUS_CACHE_VERSION = "sp-app-direct-bridge-v107-reviewed-rules"
 
 
 def _ensure_current_cache_version() -> None:
@@ -2144,6 +2144,9 @@ def _version_gate(doc: InboxDocument | None, refs: list[ReferenceDocument]) -> d
     if doc is None:
         return {"ok": False, "reason": "제출 SP 문서를 먼저 선택하세요.", "matched": None}
     matching_refs = [ref for ref in refs if ref.company == doc.company and ref.product == doc.product]
+    if not matching_refs:
+        return {"ok": False, "matched": None, "status_label": "제품명 확인 필요",
+                "reason": "제출 제품명과 일치하는 기준 SP가 없습니다. 제품명 원문을 유지하며, 연결된 허가서로 검수를 진행해 제품명 불일치를 확인할 수 있습니다. 버전 불일치로 단정하지 않습니다."}
     if not doc.version:
         return {
             "ok": False,
@@ -2248,7 +2251,7 @@ def _render_inbox_panel(documents: list[InboxDocument], selected_doc: InboxDocum
 def _render_inbox_card(doc: InboxDocument, selected: bool, gate: dict, idx: int) -> None:
     card_class = "submitted-card selected" if selected else "submitted-card"
     status_class = "match" if gate.get("ok") else "mismatch"
-    status_label = "버전 일치" if gate.get("ok") else "버전 확인 필요"
+    status_label = _escape(gate.get("status_label") or ("버전 일치" if gate.get("ok") else "버전 확인 필요"))
     version = doc.version or "버전 없음"
     subject = doc.subject or "메일 제목 정보 없음"
     permit_summary = _permit_summary(doc)
@@ -2947,7 +2950,7 @@ def _render_reference_panel(
     display_refs = _filter_reference_documents(filter_state)
     gate_context = _is_gate_filter_context(selected_doc, filter_state)
 
-    if selected_doc is None or gate_context:
+    if selected_doc is None or gate_context or _can_review_with_linked_permit(selected_doc, gate):
         _render_gate_message(gate, selected_doc)
     else:
         _render_reference_browse_notice(selected_doc, filter_state)
@@ -2967,7 +2970,7 @@ def _render_reference_panel(
             _render_reference_card(ref, selected_doc, gate)
 
     st.markdown('<div class="action-bar">', unsafe_allow_html=True)
-    can_continue = selected_doc is not None and gate_context
+    can_continue = selected_doc is not None and (gate_context or _can_review_with_linked_permit(selected_doc, gate))
     if st.button("검수 진행", type="primary", use_container_width=True, disabled=not can_continue):
         if selected_doc is None:
             st.warning("검수할 제출 SP 문서를 먼저 선택해야 합니다.")
@@ -2990,6 +2993,12 @@ def _render_reference_panel(
 
         st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
+
+
+def _can_review_with_linked_permit(doc, gate) -> bool:
+    """A product mismatch is a review finding, not a reason to block its review."""
+    return bool(doc is not None and gate.get("matched") is None
+                and any(Path(path).is_file() for path in getattr(doc, "permit_files", ())))
 
 
 def _is_gate_filter_context(selected_doc: InboxDocument | None, filter_state: dict[str, str]) -> bool:
@@ -3080,7 +3089,7 @@ def _render_gate_message(gate: dict, selected_doc: InboxDocument | None) -> None
         title = "버전 매칭 통과"
     else:
         status_class = "error"
-        title = "기준 SP 버전 불일치"
+        title = gate.get("status_label") or "기준 SP 버전 불일치"
 
     st.markdown(
         f"""

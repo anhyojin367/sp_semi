@@ -14,7 +14,7 @@ from sp_pdf_judger.manufacturing_stage_ui import _norm_match
 ROOT = Path(__file__).resolve().parents[1]
 
 
-@pytest.mark.parametrize("case", [f"D{i:02d}" for i in range(13)])
+@pytest.mark.parametrize("case", [f"D{i:02d}" for i in range(17)])
 def test_corpus_findings_and_ui_use_identical_outcomes(case, monkeypatch, tmp_path):
     import sp_judgement_bridge as bridge
     import sp_pdf_judger.manufacturing_stage_ui as ui
@@ -53,5 +53,5 @@ def test_corpus_findings_and_ui_use_identical_outcomes(case, monkeypatch, tmp_pa
     counts = bridge._overall_from_rows(bridge._read_summary_rows_by_position(csv_path))
     assert counts == {"pass": result.summary.passed, "fail": result.summary.failed,
                       "hold": result.summary.held, "total": result.summary.total}
-    if case != "D00":
+    if case not in {"D00", "D15", "D16"}:
         assert counts["fail"] > 0, "MD-only failures must remain visible in overall UI totals"

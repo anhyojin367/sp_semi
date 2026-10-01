@@ -20,7 +20,7 @@ def isolated_pipeline(monkeypatch, tmp_path):
     """Run real orchestration with no PDF, LLM, or domain-specific judgement."""
     monkeypatch.setattr(module.tempfile, "gettempdir", lambda: str(tmp_path))
     monkeypatch.setattr(module, "RuleBook", lambda *a: SimpleNamespace(
-        fingerprint="rules", rules=[], search_alias_groups=lambda _: []))
+        fingerprint="rules", rules=[], requirements=[], search_alias_groups=lambda _: []))
     monkeypatch.setattr(module, "PolicyContext", lambda *a, **kw: None)
     monkeypatch.setattr(module, "evaluate_policies", lambda *a: [])
     monkeypatch.setattr(module, "summarize_manufacturing_policies", lambda *a: ("", "", {}))
