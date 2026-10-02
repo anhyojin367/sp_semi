@@ -30,6 +30,7 @@ from .utils import clean_text, ensure_dir
 from .policy_engine import RuleBook, PolicyContext, evaluate_policies, to_evaluations, normalize_record_units, normalize_record_result
 from .numeric_safety import result_is_requirement
 from .policy_summary import summarize_manufacturing_policies, manufacturing_policy_cards, apply_policy_test_guards
+from .review_presentation import review_receipt, unit_audit_reason, file_sha256
 
 GENERIC_EXTERNAL_CRITERIA_RE = re.compile(
     r"(허가서|허가사항|허가조건|승인사항|기준서|별도\s*기준).*(따름|준함|참조)|"
@@ -651,6 +652,8 @@ class DocumentJudgePipeline:
         detail_profile = self._activate_detail_profile(static_result)
         # Reload on every run: editing a Markdown policy must affect the next judgement.
         rule_book = RuleBook(self.rule_dir) if self.rule_dir else RuleBook()
+        receipt = review_receipt(pdf_path, self.permit_store.permit_pdf_paths, rule_book.fingerprint,
+                                 llm_enabled=self.llm_client.enabled, model=self.llm_client.model)
         from .rule_profile import resolve_rule_product
         rule_product, rule_profile_audit = resolve_rule_product(self.product, self.permit_store, rule_book)
         search_aliases = rule_book.search_alias_groups(rule_product)
@@ -709,6 +712,7 @@ class DocumentJudgePipeline:
 
         evaluations: list[Evaluation] = []
         result_normalizations = []
+        unit_normalizations = []
         priority_general_applied: list[dict] = []
         for test_index, record in enumerate(test_records, 1):
             progress(f"시험 {test_index}/{len(test_records)} · {record.section_title or ''} · {record.test_name or ''}")
@@ -718,7 +722,7 @@ class DocumentJudgePipeline:
                 evaluations.append(priority_eval)
                 priority_general_applied.extend(priority_meta.get("applied", []))
                 continue
-            normalized = normalize_record_units(record, rule_book, rule_product)
+            normalized = normalize_record_units(record, rule_book, rule_product, audit=unit_normalizations)
             normalized, result_alias = normalize_record_result(normalized, rule_book, rule_product)
             evaluation = self.judge_engine.judge_record(normalized)
             if result_alias:
@@ -769,6 +773,11 @@ class DocumentJudgePipeline:
         progress(f"시험 {len(test_records)}/{len(test_records)} 완료 · MD 정합성 검증")
         policy_findings = evaluate_policies(policy_context, rule_book)
         test_guard_audit = apply_policy_test_guards(evaluations, policy_findings)
+        # Attach comparison provenance after vetoes, so a failure cannot erase it.
+        for evaluation in evaluations:
+            for entry in unit_normalizations:
+                if entry["order_idx"] == evaluation.order_idx:
+                    evaluation.reason = (evaluation.reason or "") + "\n" + unit_audit_reason(entry)
         manufacturing_status, manufacturing_reason, manufacturing_meta = summarize_manufacturing_policies(
             policy_findings, rule_book, manufacturing_page_numbers)
         manufacturing_cards = manufacturing_policy_cards(policy_findings, rule_book, records=records)
@@ -792,6 +801,11 @@ class DocumentJudgePipeline:
             comparable_total=comparable_total,
         )
 
+        if receipt["sp"]["sha256"] and receipt["sp"]["sha256"] != file_sha256(pdf_path):
+            raise RuntimeError("검수 도중 SP 파일이 변경되었습니다. 변경된 파일로 다시 검수해 주세요.")
+        for path, item in zip(self.permit_store.permit_pdf_paths, receipt["permits"]):
+            if item["sha256"] and item["sha256"] != file_sha256(path):
+                raise RuntimeError("검수 도중 허가서 파일이 변경되었습니다. 변경된 파일로 다시 검수해 주세요.")
         return ProcessingResult(
             pdf_path=pdf_path,
             preview_image_path=preview_path,
@@ -812,6 +826,8 @@ class DocumentJudgePipeline:
                 "comparison_bases": self.judge_engine.comparison_bases,
                 "permit_search_aliases": search_aliases,
                 "result_normalizations": result_normalizations,
+                "unit_normalizations": unit_normalizations,
+                "review_receipt": receipt,
                 "permit_llm_audit": getattr(self.llm_client, "permit_audit", []),
                 "manufacturing_summary_judgement": manufacturing_status,
                 "extract_dir": str(extract_dir),

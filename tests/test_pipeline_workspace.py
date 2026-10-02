@@ -75,6 +75,42 @@ def test_submission_company_is_forwarded_to_policy_context(isolated_pipeline, mo
     assert captured["company"] == "synthetic-company"
 
 
+def test_unit_provenance_survives_final_md_veto(isolated_pipeline, monkeypatch, tmp_path):
+    from sp_pdf_judger.policy_engine import RuleBook
+    from sp_pdf_judger.schemas import Evaluation
+    monkeypatch.setattr(module, "RuleBook", RuleBook)
+    obj = isolated_pipeline()
+    obj.product = "스카이코비원멀티주"
+    row = ExtractedRecord(order_idx=1, test_name="엔도톡신시험",
+        criteria="820 EU/mg of protein 미만", result="760 IU/mg of protein")
+    obj.judge_engine.judge_record = lambda r: Evaluation(order_idx=1, test_name=r.test_name,
+        criteria=r.criteria, result=r.result, final_status="검수합격", reason="수치 충족", comparison_completed=True)
+    def veto(evaluations, findings):
+        evaluations[0].final_status = "검수불합격"
+        evaluations[0].reason = "R10: 기간 미달"
+        return []
+    monkeypatch.setattr(module, "apply_policy_test_guards", veto)
+    result = obj.run(tmp_path / "fake.pdf", extracted_records=[row])
+    ev = result.evaluations[0]
+    assert ev.final_status == "검수불합격" and ev.result == row.result
+    assert "기간 미달" in ev.reason and "MD 단위 표기 대응" in ev.reason
+    assert "수치 충족" not in ev.reason
+    assert result.metadata["unit_normalizations"][0]["original"] == row.result
+
+
+def test_changing_pdf_during_extraction_cannot_receive_stale_receipt(isolated_pipeline, monkeypatch, tmp_path):
+    pdf = tmp_path / "changing.pdf"
+    pdf.write_bytes(b"original")
+    original = module.extract_records
+    def mutate(path, directory):
+        records = original(path, directory)
+        path.write_bytes(b"different")
+        return records
+    monkeypatch.setattr(module, "extract_records", mutate)
+    with pytest.raises(RuntimeError, match="SP 파일이 변경"):
+        isolated_pipeline().run(pdf)
+
+
 def test_parallel_requests_keep_separate_raw_evidence(isolated_pipeline, monkeypatch, tmp_path):
     barrier = Barrier(2)
     captured = {}

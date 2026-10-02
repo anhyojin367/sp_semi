@@ -45,6 +45,7 @@ from sp_pdf_judger.rule_regression import (
     write_output_index,
 )
 from sp_pdf_judger.schemas import Summary
+from sp_pdf_judger.review_presentation import render_reason, render_review_context
 from sp_pdf_judger.ui_html import (
     _render_section1_pdf_pages,
     render_result_html,
@@ -56,7 +57,7 @@ JUDGE_COMPONENT_HEIGHT = 10000
 FINAL_JUDGEMENT_VIEWPORT_HEIGHT = 860
 JUDGEMENT_STATUS_DIR = Path(__file__).resolve().parent / ".sp_judgement_status"
 JUDGEMENT_STATUS_INDEX = JUDGEMENT_STATUS_DIR / "status_index.json"
-JUDGEMENT_CACHE_VERSION = "sp-app-direct-bridge-v107-reviewed-rules"
+JUDGEMENT_CACHE_VERSION = "sp-app-direct-bridge-v108-review-clarity"
 _RETRY_REQUEST_SESSION_KEY = "sp_explicit_review_retry"
 
 
@@ -106,7 +107,7 @@ def _policy_evidence_links(result: Any, rule_id: str) -> str:
     if not audit:
         return ""
     permits = [Path(p) for p in result.metadata.get("permit_paths", [])]
-    links, seen = [], set()
+    links, quotes = {}, {}
     for evidence in audit.get("evidence", []):
         page = evidence.get("page")
         if not isinstance(page, int) or page < 1:
@@ -119,14 +120,17 @@ def _policy_evidence_links(result: Any, rule_id: str) -> str:
                 continue
             path, label = candidates[0], "허가서"
         identity = (str(path.resolve()), page)
-        if identity in seen:
-            continue
-        seen.add(identity)
         token = base64.urlsafe_b64encode(identity[0].encode()).decode().rstrip("=")
-        links.append(f'<a href="/?view=pdf_viewer&amp;pdf={token}&amp;page={page}" target="_blank" rel="noopener noreferrer">{label} {page}쪽</a>')
+        links[identity] = f'<a href="/?view=pdf_viewer&amp;pdf={token}&amp;page={page}" target="_blank" rel="noopener noreferrer">{label} {page}쪽</a>'
+        quote = str(evidence.get("quote") or "")
+        if quote and quote not in quotes.setdefault(identity, []):
+            quotes[identity].append(quote)
     if not links:
         return ""
-    return f'<details><summary>근거 원문 ({len(links)})</summary>{" · ".join(links)}</details>'
+    content = "".join(link + "".join('<blockquote style="white-space:pre-wrap;overflow-wrap:anywhere;">'
+                     + html.escape(quote) + '</blockquote>' for quote in quotes.get(identity, []))
+                     for identity, link in links.items())
+    return f'<details><summary>근거 원문 ({len(links)})</summary>{content}</details>'
 
 
 # ============================================================
@@ -239,6 +243,14 @@ def _render_structural_validation_cards(
         result_text = str(getattr(ev, "result", "") or "")
         reason = _display_reason_text(getattr(ev, "reason", ""))
         evidence_links = _policy_evidence_links(result, section_number) if getattr(ev, "source", "") == "md_policy" else ""
+        audit = next((a for a in result.metadata.get("policy_audit", []) if a.get("rule_id") == section_number), {})
+        catalog = {r["id"]: r for r in result.metadata.get("requirement_catalog", [])}
+        aliases = [alias + (" (일부 구현)" if catalog.get(alias, {}).get("coverage") == "partial" else "")
+                   for alias in audit.get("aliases", [])]
+        alias_html = ('<div class="structural-card-aliases">관련 MD: ' + html.escape(" · ".join(aliases)) + '</div>') if aliases else ""
+        # The finding reason is the concise conclusion; the duplicate result
+        # field and complete source quotes remain available in the raw receipt.
+        reason = _display_reason_text(audit.get("reason") or reason)
 
         cards.append(
             f"""
@@ -246,14 +258,14 @@ def _render_structural_validation_cards(
               <div class="structural-card-head">
                 <div>
                   <div class="structural-card-kicker">{html.escape(section_number)}</div>
+                  {alias_html}
                   <div class="structural-card-title">{html.escape(title)}</div>
                 </div>
                 <span class="structural-card-status {klass}">{html.escape(status)}</span>
               </div>
               <div class="structural-card-body">
                 <div><b>검증 기준</b><span>{html.escape(criteria)}</span></div>
-                <div><b>검증 결과</b><span>{html.escape(result_text)}</span></div>
-                <div><b>판정 이유</b><span>{html.escape(reason)}{evidence_links}</span></div>
+                <div><b>판정 이유</b><span>{render_reason(reason)}{evidence_links}</span></div>
               </div>
             </article>
             """
@@ -310,6 +322,7 @@ def _render_structural_validation_cards(
           line-height:1.35;
           font-weight:950;
         }}
+        .structural-card-aliases {{ color:#475569; font-size:13px; margin-top:6px; line-height:1.6; }}
         .structural-card-status {{
           flex:0 0 auto;
           border-radius:999px;
@@ -2472,6 +2485,7 @@ def render_final_judgement_page(
         """
     )
 
+    combined_parts.append(render_review_context(result))
     general_info_html = _render_section1_pdf_pages(result)
     if general_info_html:
         combined_parts.append(general_info_html)

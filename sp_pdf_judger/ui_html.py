@@ -15,6 +15,7 @@ from .utils import clean_text
 from .config import FAIL_LABEL, HOLD_LABEL, PASS_LABEL, STATUS_COLORS
 from .schemas import ProcessingResult, Summary, TreeNode
 from .utils import html_escape
+from .review_presentation import render_reason
 
 
 def render_summary_card(summary: Summary) -> str:
@@ -794,14 +795,18 @@ def _render_reason_box(ev) -> str:
 
     if rows:
         reason_html = "".join(
-            f'<div style="margin-top:6px;"><b>{html_escape(row.get("item_value") or row.get("lot_no", ""))}</b>: {html_escape(_display_judgement_reason_text(row.get("reason", "")))}</div>'
+            f'<div style="margin-top:6px;"><b>{html_escape(row.get("item_value") or row.get("lot_no", ""))}</b>: {render_reason(_display_judgement_reason_text(row.get("reason", "")))}</div>'
             for row in rows
             if (row.get("item_value") or row.get("lot_no")) and row.get("reason")
         )
+        notes = "\n".join(line for line in (getattr(ev, "reason", "") or "").splitlines()
+                          if line.startswith(("MD 단위 표기 대응:", "MD 결과 표기 사전:")))
+        if notes:
+            reason_html += render_reason(notes)
     else:
         if not getattr(ev, "reason", ""):
             return ""
-        reason_html = html_escape(_display_judgement_reason_text(ev.reason))
+        reason_html = render_reason(_display_judgement_reason_text(ev.reason))
 
     normalized = ""
 

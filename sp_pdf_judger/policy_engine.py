@@ -840,7 +840,7 @@ def unit_consistency(rule, ctx):
     return outcome(rule, errors, evidence, checked)
 
 
-def normalize_record_units(record, book, product=""):
+def normalize_record_units(record, book, product="", *, audit=None):
     """Policy aliases affect comparisons only; the original extracted evidence is preserved."""
     from dataclasses import replace
     criteria, result = record.criteria, record.result
@@ -850,8 +850,17 @@ def normalize_record_units(record, book, product=""):
         for mapping in rule.params.get("unit_aliases", []):
             if norm(mapping["test"]) in norm(record.test_name):
                 pattern = r"(?<![A-Za-z/])" + re.escape(mapping["from"]).replace(r"\ ", r"\s+") + r"(?![A-Za-z/]|\s*/)"
+                before_criteria, before_result = criteria, result
                 criteria = re.sub(pattern, mapping["to"], criteria or "", flags=re.I)
                 result = re.sub(pattern, mapping["to"], result or "", flags=re.I)
+                if audit is not None:
+                    for field, original, compared in (("criteria", before_criteria, criteria),
+                                                       ("result", before_result, result)):
+                        if (original or "") != compared:
+                            audit.append({"order_idx": record.order_idx, "rule_id": rule.id,
+                                "product": product, "test_name": record.test_name,
+                                "field": field, "original": original, "compared": compared,
+                                "from": mapping["from"], "to": mapping["to"]})
     return replace(record, criteria=criteria, result=result)
 
 

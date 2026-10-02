@@ -1,5 +1,5 @@
 # Python 3.10-3.14 runtime; share pins except Camelot's Python-specific pypdf dependency.
-# Deployment restart marker: v107-reviewed-rules (reload the changed Rule schema).
+# Deployment restart marker: v108-review-clarity (reload review provenance and theme).
 # Keep pins unchanged; Community Cloud re-resolves dependencies when this file changes.
 # Streamlit 1.61 includes the Python 3.14 deferred-annotation fix.
 streamlit==1.61.0

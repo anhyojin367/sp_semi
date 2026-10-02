@@ -25,6 +25,7 @@ from sp_pdf_judger.domain_details import resolve_domain_detail_profile
 from sp_pdf_judger.policy_engine import policy_fingerprint
 from sp_pdf_judger.extraction_runtime import extraction_fingerprint
 from sp_pdf_judger.permit_catalog import resolve_submission_permits
+from sp_pdf_judger.review_presentation import COUNT_HELP
 from sp_simulation_jobs import get_simulation_job, forget_failed_simulation
 from sp_flowchart_data import simulation_structure_notice
 from sp_sim2_viewer import build_simulation_html as build_sim2_html
@@ -40,8 +41,8 @@ DEFAULT_GMAIL_SINCE = date(2026, 1, 1)
 GMAIL_CONFIRMATION_VERSION = "manual-gmail-confirm-20260602-v2"
 JUDGEMENT_STATUS_DIR = Path(__file__).resolve().parent / ".sp_judgement_status"
 JUDGEMENT_STATUS_INDEX = JUDGEMENT_STATUS_DIR / "status_index.json"
-APP_CACHE_VERSION = "sp-ui-cache-v107-reviewed-rules"
-JUDGEMENT_STATUS_CACHE_VERSION = "sp-app-direct-bridge-v107-reviewed-rules"
+APP_CACHE_VERSION = "sp-ui-cache-v108-review-clarity"
+JUDGEMENT_STATUS_CACHE_VERSION = "sp-app-direct-bridge-v108-review-clarity"
 
 
 def _ensure_current_cache_version() -> None:
@@ -1701,6 +1702,7 @@ def _review_summary_html(status: dict) -> str:
         f'<div><span class="dot hold"></span><span>보류</span><b>{held}건</b></div>'
         f'<div class="total"><span>전체</span><b>{total}건</b></div>'
         '</div>'
+        f'<details class="count-help"><summary>집계 기준</summary>{COUNT_HELP}</details>'
     )
 
 
@@ -3562,7 +3564,6 @@ def _inject_styles(fit_first_page: bool = True) -> None:
             --yellow: #d97706;
             --red: #dc2626;
         }
-        }
         html, body, [data-testid="stAppViewContainer"] {
             background:
               radial-gradient(circle at 1px 1px, rgba(255,255,255,.22) 1px, transparent 0) 0 0 / 24px 24px,
@@ -4588,6 +4589,34 @@ def _inject_styles(fit_first_page: bool = True) -> None:
             background:transparent !important;
             box-shadow:none !important;
         }
+        /* The existing dashboard is a light UI. Keep native widgets readable
+           even when a browser session retained Streamlit's dark preference. */
+        html, body, .stApp, [data-testid="stAppViewContainer"] {
+            color-scheme:light !important;
+            background-color:#f5f7fb !important;
+            color:#1f2937 !important;
+        }
+        [data-testid="stWidgetLabel"], [data-testid="stWidgetLabel"] p,
+        [data-testid="stCaptionContainer"] { color:#475569 !important; }
+        .stButton > button:not([kind="primary"]) {
+            background:#ffffff !important; color:#1f2937 !important; border-color:#cbd5e1 !important;
+        }
+        .stButton > button:not([kind="primary"]) p { color:inherit !important; }
+        .stButton > button:disabled { color:#64748b !important; background:#f1f5f9 !important; }
+        .stSelectbox [data-baseweb="select"] > div,
+        .stMultiSelect [data-baseweb="select"] > div,
+        [data-baseweb="input"], [data-baseweb="input"] input,
+        [data-baseweb="textarea"], [data-baseweb="textarea"] textarea,
+        [data-testid="stFileUploaderDropzone"] {
+            background:#f8fafc !important; color:#1f2937 !important;
+        }
+        [data-baseweb="popover"], [data-baseweb="popover"] ul,
+        [data-baseweb="popover"] li { background:#ffffff !important; color:#1f2937 !important; }
+        [data-testid="stDialog"] [role="dialog"] { background:#ffffff !important; color:#1f2937 !important; }
+        .gate-banner.error { background:#fff1f2 !important; border-color:#fda4af !important; }
+        .gate-banner.error b, .gate-banner.error span { color:#9f1239 !important; }
+        .count-help { color:#475569; background:#fff; padding:6px 10px; font-size:.82rem; line-height:1.6; }
+        .count-help summary { cursor:pointer; }
         __FIRST_PAGE_FIT_CSS__
         </style>
         """.replace("__FIRST_PAGE_FIT_CSS__", first_page_fit_css),
