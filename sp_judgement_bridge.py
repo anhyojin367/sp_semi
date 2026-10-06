@@ -69,6 +69,14 @@ class JudgementStatusError(JudgementCacheError):
     """Do not overwrite unreadable document history or repeat the judgement."""
 
 
+class JudgementPending(RuntimeError):
+    """Let the UI poll the existing job without blocking its script thread."""
+
+    def __init__(self, job):
+        super().__init__("Document review is still running")
+        self.job = job
+
+
 def _read_judgement_cache(path: Path) -> dict[str, Any]:
     try:
         artifacts = pickle.loads(path.read_bytes())
@@ -1306,6 +1314,7 @@ def ensure_judgement_artifacts(
     _progress=None,
     _prepared=None,
     _retry_failed: bool = False,
+    _defer_pending: bool = False,
 ) -> dict[str, Any]:
     """
     실제 sp_pdf_judger를 실행해서 before/after 판정 결과와 summary CSV를 만든다.
@@ -1351,6 +1360,8 @@ def ensure_judgement_artifacts(
         job = get_judgement_job(pdf_path=pdf_path, permit_paths=permit_paths,
             original_csv_dir=original_csv_dir, company=company, product=product,
             _prepared=(detail_profile, permit_resolution, key))
+        if _defer_pending and not job.future.done():
+            raise JudgementPending(job)
         with st.spinner("문서 판정 결과를 준비하고 있습니다..."):
             artifacts = job.future.result()
         st.session_state[session_key] = artifacts
@@ -2187,6 +2198,16 @@ def _return_to_document_list() -> None:
     st.rerun()
 
 
+@st.fragment(run_every=1.0)
+def _render_pending_final_review(job) -> None:
+    if job.future.done():
+        st.rerun()
+    message, elapsed = job.snapshot()
+    st.info(f"{message} · 경과 {int(elapsed)}초\n\n"
+            "상세 판정 결과를 준비 중입니다. 첫 화면으로 돌아가도 작업은 유지되며, "
+            "같은 문서의 요청은 진행 중인 작업에 연결됩니다.")
+
+
 def render_final_judgement_page(
     *,
     selected_doc: Any,
@@ -2226,7 +2247,12 @@ def render_final_judgement_page(
             original_csv_dir=Path(original_csv_dir) if original_csv_dir else None,
             company=str(getattr(selected_doc, "company", "") or ""),
             product=str(getattr(selected_doc, "product", "") or ""),
+            _defer_pending=True,
         )
+    except JudgementPending as pending:
+        progress_slot.empty()
+        _render_pending_final_review(pending.job)
+        return
     except Exception as exc:
         progress_slot.empty()
         st.error(f"판정 생성에 실패했습니다. 이전 결과로 대체하지 않습니다: {exc}")
