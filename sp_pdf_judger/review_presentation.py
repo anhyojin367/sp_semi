@@ -56,15 +56,17 @@ def unit_audit_reason(entry):
 def render_reason(text):
     """Keep every word; collapse lengthy prose without summarizing with an LLM."""
     text = str(text or "")
-    lines = list(dict.fromkeys(line.strip() for line in text.splitlines() if line.strip()))
+    # Repeated lines may belong to separate clauses; never deduplicate evidence.
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
     notes = [line for line in lines if line.startswith(("MD 단위 표기 대응:", "MD 결과 표기 사전:"))]
     body = "\n".join(line for line in lines if line not in notes)
     escaped = html.escape(body).replace("\n", "<br>")
     if len(body) > 350:
         # An explicitly labelled excerpt, not a new/reinterpreted conclusion.
         preview = html.escape(body[:240]).replace("\n", "<br>")
-        escaped = (f'<div>{preview}… <small>(설명 일부)</small></div>'
-                   f'<details><summary>판정 설명 전체 보기</summary><div>{escaped}</div></details>')
+        escaped = (f'<div class="reason-preview">{preview}… <small>(설명 일부)</small></div>'
+                   f'<details class="reason-full"><summary>판정 설명 전체 보기</summary>'
+                   f'<div class="reason-full-text">{escaped}</div></details>')
     return escaped + "".join(f'<div class="normalization-note" style="margin-top:8px;">{html.escape(line)}</div>' for line in notes)
 
 

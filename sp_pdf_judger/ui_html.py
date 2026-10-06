@@ -16,6 +16,7 @@ from .config import FAIL_LABEL, HOLD_LABEL, PASS_LABEL, STATUS_COLORS
 from .schemas import ProcessingResult, Summary, TreeNode
 from .utils import html_escape
 from .review_presentation import render_reason
+from .permit_text_view import EMPTY_VIEW, permit_reason_view, permit_view_for_result
 
 
 def render_summary_card(summary: Summary) -> str:
@@ -787,15 +788,30 @@ def _display_judgement_reason_text(text: str | None) -> str:
     )
 
 
-def _render_reason_box(ev) -> str:
+def _render_reason_box(ev, *, permit_view=EMPTY_VIEW) -> str:
     if not _has_visible_judgement(ev):
         return ""
 
     rows = getattr(ev, "lot_judgements", None) or []
+    is_permit = permit_view.has_permit_basis(ev)
+    is_permit_reason = getattr(ev, "source", "").startswith("permit_pdf")
+    raw_quotes = []
+
+    def display_basis(value):
+        raw = clean_text(value)
+        shown = permit_view.format_quote(raw) if is_permit else raw
+        if is_permit and raw != shown and raw not in raw_quotes:
+            raw_quotes.append(raw)
+        return _display_judgement_reason_text(shown)
+
+    def display_reason(value, basis):
+        if is_permit_reason:
+            value = permit_reason_view(value, basis, permit_view)
+        return _display_judgement_reason_text(value)
 
     if rows:
         reason_html = "".join(
-            f'<div style="margin-top:6px;"><b>{html_escape(row.get("item_value") or row.get("lot_no", ""))}</b>: {render_reason(_display_judgement_reason_text(row.get("reason", "")))}</div>'
+            f'<div style="margin-top:6px;"><b>{html_escape(row.get("item_value") or row.get("lot_no", ""))}</b>: {render_reason(display_reason(row.get("reason", ""), row.get("normalized_criteria") or ev.normalized_criteria))}</div>'
             for row in rows
             if (row.get("item_value") or row.get("lot_no")) and row.get("reason")
         )
@@ -806,24 +822,32 @@ def _render_reason_box(ev) -> str:
     else:
         if not getattr(ev, "reason", ""):
             return ""
-        reason_html = render_reason(_display_judgement_reason_text(ev.reason))
+        reason_html = render_reason(display_reason(ev.reason, ev.normalized_criteria))
 
     normalized = ""
 
     if ev.normalized_criteria or ev.normalized_result:
-        criteria_label = ("적용 허가서 기준" if getattr(ev, "source", "").startswith("permit_pdf")
+        criteria_label = ("적용 허가서 기준" if is_permit
                           else "정규화 시험기준")
         normalized = f"""
         <div style="margin-top:12px;color:#4b5563;line-height:1.7;font-size:16px;">
-          {f'<div>{criteria_label}: {html_escape(_display_judgement_reason_text(ev.normalized_criteria))}</div>' if ev.normalized_criteria else ''}
+          {f'<div style="white-space:pre-line;overflow-wrap:anywhere;">{criteria_label}: {html_escape(display_basis(ev.normalized_criteria))}</div>' if ev.normalized_criteria else ''}
           {f'<div>정규화 시험결과: {html_escape(_display_judgement_reason_text(ev.normalized_result))}</div>' if ev.normalized_result else ''}
         </div>
         """
 
+    if raw_quotes:
+        # Source quotations are available verbatim, separate from readable
+        # prose. Neither evaluation values nor evidence offsets are rewritten.
+        normalized += ('<details class="permit-raw-quote" style="margin-top:10px;color:#4b5563;">'
+                       '<summary style="cursor:pointer;">허가서 원문 추출 보기 (줄바꿈·문서 표기 포함)</summary>'
+                       + "".join('<pre style="white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;">'
+                                 + html_escape(q) + '</pre>' for q in raw_quotes) + '</details>')
+
     return f"""
     <div style="margin-top:20px;padding:20px 22px;border-radius:16px;background:linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);border:1px solid #dbe3ea;border-left:6px solid #111827;">
       <div style="font-weight:900;color:#111827;margin-bottom:10px;font-size:18px;">판정 이유</div>
-      <div style="color:#111827;line-height:1.85;font-size:17px;">{reason_html}</div>
+      <div style="color:#111827;line-height:1.85;font-size:17px;overflow-wrap:anywhere;">{reason_html}</div>
       {normalized}
     </div>
     """
@@ -837,7 +861,7 @@ def _has_visible_judgement(ev) -> bool:
     ))
 
 
-def _render_test_leaf(node: TreeNode, depth_px: int) -> str:
+def _render_test_leaf(node: TreeNode, depth_px: int, *, permit_view=EMPTY_VIEW) -> str:
     ev = node.evaluation
 
     if ev is None:
@@ -874,7 +898,7 @@ def _render_test_leaf(node: TreeNode, depth_px: int) -> str:
             _kv_line("시험일자", getattr(ev, "test_date", None)),
             _kv_line("시험기간", getattr(ev, "test_period", None)),
             result_block,
-            _render_reason_box(ev),
+            _render_reason_box(ev, permit_view=permit_view),
             _kv_line("비고", getattr(ev, "remarks", None)),
         ]
     )
@@ -1113,6 +1137,7 @@ def _render_section(
     *,
     records: list[dict[str, Any]] | None = None,
     existing_section_numbers: set[str] | None = None,
+    permit_view=EMPTY_VIEW,
 ) -> str:
     section_anchor_html = _render_section_number_anchor(_node_section_number(node))
     anchor_html = _render_mfg_stage_anchors_for_node(node)
@@ -1129,7 +1154,7 @@ def _render_section(
 
     for child in node.children:
         if child.node_type == "test":
-            inner += _render_test_leaf(child, depth_px=18)
+            inner += _render_test_leaf(child, depth_px=18, permit_view=permit_view)
         elif child.node_type == "content":
             inner += _render_content_leaf(child, depth_px=18)
         else:
@@ -1138,6 +1163,7 @@ def _render_section(
                 depth_px=18,
                 records=records,
                 existing_section_numbers=existing_section_numbers,
+                permit_view=permit_view,
             )
 
     # 05_records.json에는 있는데 최종 tree 렌더링에서 빠진 1.2 제조요약정보를
@@ -1341,6 +1367,7 @@ def render_manufacturing_summary_card(result: ProcessingResult) -> str:
 
 
 def render_result_html(result: ProcessingResult) -> str:
+    permit_view = permit_view_for_result(result)
     styles = """
     <style>
     html {
@@ -1434,6 +1461,7 @@ def render_result_html(result: ProcessingResult) -> str:
                 depth_px=0,
                 records=records,
                 existing_section_numbers=existing_section_numbers,
+                permit_view=permit_view,
             )
             for node in judgement_nodes
         )

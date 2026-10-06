@@ -254,7 +254,7 @@ def _render_structural_validation_cards(
 
         cards.append(
             f"""
-            <article class="structural-card {klass}">
+            <article class="structural-card {klass}" data-rule-id="{html.escape(section_number, quote=True)}">
               <div class="structural-card-head">
                 <div>
                   <div class="structural-card-kicker">{html.escape(section_number)}</div>
@@ -264,8 +264,8 @@ def _render_structural_validation_cards(
                 <span class="structural-card-status {klass}">{html.escape(status)}</span>
               </div>
               <div class="structural-card-body">
-                <div><b>검증 기준</b><span>{html.escape(criteria)}</span></div>
-                <div><b>판정 이유</b><span>{render_reason(reason)}{evidence_links}</span></div>
+                <div class="structural-field"><b>검증 기준</b><div class="structural-field-value">{html.escape(criteria)}</div></div>
+                <div class="structural-field"><b>판정 이유</b><div class="structural-field-value">{render_reason(reason)}{evidence_links}</div></div>
               </div>
             </article>
             """
@@ -342,22 +342,25 @@ def _render_structural_validation_cards(
           font-size:16px;
           line-height:1.65;
         }}
-        .structural-card-body div {{
+        /* Only label/value rows are grids. Nested reason/evidence paragraphs
+           must remain normal blocks rather than inheriting the 92px column. */
+        .structural-card-body > .structural-field {{
           display:grid;
           grid-template-columns:92px minmax(0,1fr);
           gap:14px;
         }}
-        .structural-card-body b {{
+        .structural-field > b {{
           color:#111827;
           font-weight:900;
         }}
-        .structural-card-body span {{
+        .structural-field-value {{
+          min-width:0;
           white-space:pre-wrap;
           overflow-wrap:anywhere;
         }}
         @media (max-width:900px) {{
           .structural-card-grid {{ grid-template-columns:1fr; }}
-          .structural-card-body div {{ grid-template-columns:1fr; gap:4px; }}
+          .structural-card-body > .structural-field {{ grid-template-columns:1fr; gap:4px; }}
         }}
       </style>
       <div class="structural-validation-title">{html.escape(section_title)}</div>
