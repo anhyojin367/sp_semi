@@ -188,7 +188,6 @@ def test_changed_protocol_prevents_reusing_plan(tmp_path, monkeypatch, changed):
 def test_audited_request_preserves_malformed_model_text_without_headers(tmp_path, monkeypatch):
     monkeypatch.delenv("CLOVA_RESPONSE_CACHE_DIR", raising=False)
     import sp_pdf_judger.clova_client as clova
-    monkeypatch.setattr(clova, "_LAST_REQUEST", 0.0)
     client = SimpleNamespace(base_url="https://example.invalid", api_key="SECRET_HEADER",
         chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **k:
             SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content='{"bad":"shape"}'))],

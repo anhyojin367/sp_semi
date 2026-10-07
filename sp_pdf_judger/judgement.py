@@ -5,6 +5,7 @@ import re
 from .config import FAIL_LABEL, HOLD_LABEL, PASS_LABEL
 from .criteria_parser import parse_criteria_text
 from .llm import ClovaJudgeClient
+from .clova_transport import ClovaServiceError
 from .permit_pdf_store import PermitPdfStore
 from .permit_catalog import PermitPolicy
 from .rag import UcumRagStore
@@ -2851,6 +2852,8 @@ class JudgeEngine:
                 authoritative_permit=True,
                 record_context=self._record_context(record),
             )
+        except ClovaServiceError:
+            raise
         except Exception:
             return safe_hold
 

@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import json
 import re
-import time
-import threading
 import os
 import hashlib
 import uuid
@@ -11,6 +9,7 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 from pydantic import BaseModel
+from .clova_transport import completion_with_backoff, response_cache_dir
 
 try:
     from openai import OpenAI
@@ -19,32 +18,10 @@ except Exception:  # pragma: no cover - optional until runtime dependencies are 
 
 
 ResponseModelT = TypeVar("ResponseModelT", bound=BaseModel)
-_REQUEST_LOCK = threading.Lock()
-_LAST_REQUEST = 0.0
 
 
 def _completion_with_backoff(client, request):
-    """Respect provider throttling; a rate limit is never a judgement result."""
-    global _LAST_REQUEST
-    for attempt in range(5):
-        with _REQUEST_LOCK:
-            delay = max(0.0, 2.0 - (time.monotonic() - _LAST_REQUEST))
-            if delay:
-                time.sleep(delay)
-            _LAST_REQUEST = time.monotonic()
-        try:
-            return client.chat.completions.create(**request)
-        except Exception as exc:
-            if getattr(exc, "status_code", None) != 429 or attempt == 4:
-                raise
-            headers = getattr(getattr(exc, "response", None), "headers", {}) or {}
-            try:
-                retry_after = float(headers.get("retry-after", "0"))
-            except (TypeError, ValueError):
-                retry_after = 0
-            delay = max(retry_after, min(60, 10 * 2 ** attempt))
-            print(f"[CLOVA_RATE_LIMIT] retry {attempt + 1}/4 after {delay:.0f}s", flush=True)
-            time.sleep(delay)
+    return completion_with_backoff(client, request)
 
 
 def create_clova_client(api_key: str, base_url: str) -> Any | None:
@@ -109,7 +86,7 @@ def request_structured_response(
             },
         }
     cache_path = None
-    cache_root = os.getenv("CLOVA_RESPONSE_CACHE_DIR")
+    cache_root = os.getenv("CLOVA_RESPONSE_CACHE_DIR") or response_cache_dir()
     if cache_root:
         from .policy_engine import policy_fingerprint
         signature = json.dumps({"request": request, "schema": response_model.model_json_schema(),

@@ -22,6 +22,7 @@ from .policy_criteria import resolve_criterion
 from .policy_schema import Requirement, RuleSelector, Text, load_frontmatter, validate_params
 from .policy_time import complete_timestamp, complete_duration_seconds, seconds_text
 from .table_values import field_values, material_rows
+from .clova_transport import ClovaServiceError, service_error
 
 DEFAULT_RULE_DIR = Path(__file__).parent / "rules"
 
@@ -755,7 +756,8 @@ def semantic_review(rule, ctx):
                    response_model=SemanticResponse, use_schema=True)
         ctx.llm.success_count += 1
     except Exception as exc:
-        return finding(rule, "HOLD", f"의미 판정 호출 실패: {type(exc).__name__}")
+        ctx.llm.last_error = str(service_error(exc))
+        raise service_error(exc) from exc
     if answer.status not in {"PASS", "FAIL", "HOLD"} or not answer.evidence_indices or any(i < 0 or i >= len(evidence) for i in answer.evidence_indices):
         return finding(rule, "HOLD", "LLM 응답의 상태 또는 근거 참조가 유효하지 않습니다.")
     return finding(rule, answer.status, answer.reason, [evidence[i] for i in answer.evidence_indices])
@@ -1041,6 +1043,8 @@ def evaluate_policies(ctx, book=None):
                             "reason": check.reason, "comparator": "md_" + rule.operation})
                 result.details["test_guards"] = guards
             findings.append(result)
+        except ClovaServiceError:
+            raise
         except Exception as exc:
             findings.append(finding(rule, "HOLD", f"규칙 실행 오류: {type(exc).__name__}", execution_error=True))
     by_id = {item.rule_id: item for item in findings}

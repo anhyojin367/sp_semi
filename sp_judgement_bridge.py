@@ -27,6 +27,7 @@ import streamlit.components.v1 as components
 from sp_pdf_judger.domain_details import resolve_domain_detail_profile
 from sp_pdf_judger.permit_catalog import resolve_submission_permits as resolve_permits
 from sp_pdf_judger.pipeline import DocumentJudgePipeline
+from sp_pdf_judger.clova_transport import ClovaServiceError, clova_request_context
 from sp_pdf_judger.policy_engine import policy_fingerprint
 from sp_pdf_judger.extraction_runtime import extraction_fingerprint
 from sp_pdf_judger.stage_csv_exporter import (
@@ -610,6 +611,10 @@ def _remember_judgement_artifacts(artifacts: dict[str, Any]) -> None:
         "detail_fingerprint": str(artifacts.get("detail_fingerprint") or ""),
         "detail_sources": list(artifacts.get("detail_sources", []) or []),
     }
+    _store_status_entry(pdf_path, entry)
+
+
+def _store_status_entry(pdf_path: Path, entry: dict) -> None:
     # Distinct artifact locks do not protect this shared read/modify/write.
     # Keep the global section short: no PDF, provider call, or CSV generation.
     try:
@@ -1394,11 +1399,60 @@ def ensure_judgement_artifacts(
             )
         # A click while another owner runs joins that attempt, including its
         # failure. It must not queue a second paid retry after the owner exits.
-        return _ensure_disk_artifacts(key=key, root_dir=root_dir, pdf_path=pdf_path,
-            resolved_permit_paths=resolved_permit_paths, original_csv_dir=original_csv_dir,
-            company=company, product=product, detail_profile=detail_profile,
-            permit_resolution=permit_resolution, progress=progress,
-            _retry_failed=_retry_failed and not waited)
+        try:
+            with clova_request_context(progress, JUDGEMENT_STATUS_DIR / "clova_responses"):
+                return _ensure_disk_artifacts(key=key, root_dir=root_dir, pdf_path=pdf_path,
+                    resolved_permit_paths=resolved_permit_paths, original_csv_dir=original_csv_dir,
+                    company=company, product=product, detail_profile=detail_profile,
+                    permit_resolution=permit_resolution, progress=progress,
+                    _retry_failed=_retry_failed and not waited)
+        except ClovaServiceError as exc:
+            # Keep failed requests separate from all actual judgement results.
+            # No fake HOLD rows, summary CSV or completed pickle is published.
+            _remember_service_failure(root_dir, key, pdf_path, exc,
+                permit_resolution, detail_profile)
+            raise
+
+
+def _remember_service_failure(root_dir, key, pdf_path, error, permits, details):
+    path = root_dir / "service_failure.json"
+    if not path.exists():
+        pending = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=root_dir,
+                    prefix=".service-failure-", suffix=".tmp", delete=False) as stream:
+                pending = Path(stream.name)
+                json.dump(error.as_dict(), stream, ensure_ascii=False)
+                stream.flush()
+                os.fsync(stream.fileno())
+            pending.replace(path)
+        finally:
+            if pending is not None and pending.exists():
+                pending.unlink()
+    stat = pdf_path.stat()
+    _store_status_entry(pdf_path, {
+        "status": "failed", "cache_version": JUDGEMENT_CACHE_VERSION,
+        "artifact_key": key, "pdf_path": str(pdf_path),
+        "pdf_sig": {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns},
+        "updated_at": datetime.now().isoformat(timespec="seconds"),
+        "summary_counts": {}, "service_failure": error.as_dict(),
+        "rule_fingerprint": policy_fingerprint(),
+        "extraction_fingerprint": extraction_fingerprint(),
+        "permit_fingerprint": permits.fingerprint,
+        "detail_fingerprint": details.fingerprint,
+    })
+
+
+def _read_service_failure(path):
+    try:
+        info = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(info, dict) or "kind" not in info:
+            raise ValueError("Invalid failure record")
+        return ClovaServiceError(**{key: info[key] for key in
+            ("kind", "status_code", "provider_code", "retry_after") if key in info})
+    except (OSError, ValueError, TypeError) as exc:
+        raise JudgementCacheError("저장된 API 실패 기록을 읽지 못했습니다. 자동 재호출하지 않습니다. "
+                                  "문서 목록의 '검수 진행'으로 재시도하세요.") from exc
 
 
 def _record_judgement_attempt(root_dir: Path, key: str, pdf_path: Path) -> None:
@@ -1421,6 +1475,14 @@ def _ensure_disk_artifacts(*, key, root_dir, pdf_path, resolved_permit_paths,
     """Caller must hold the artifact OS lock through publication/status writes."""
     _ensure_dir(root_dir)
     result_cache_path = root_dir / "judgement_artifacts.pkl"
+    failure_path = root_dir / "service_failure.json"
+    if failure_path.exists():
+        if not _retry_failed:
+            raise _read_service_failure(failure_path)
+        # Also archive any old failed pickle/CSV left by an interrupted retry.
+        archive_dir = root_dir.with_name(f"{root_dir.name}.service-failed-{uuid4().hex}")
+        root_dir.rename(archive_dir)
+        _ensure_dir(root_dir)
     if not result_cache_path.exists() and any(root_dir.iterdir()):
         # Includes pre-marker legacy workspaces and unreadable/partial records.
         # Never infer reusable stage results from CSVs or a folder's existence.

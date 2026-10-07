@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field, PrivateAttr
 
 from .clova_client import create_clova_client, request_structured_response
+from .clova_transport import allows_schema_fallback, service_error
 from .config import (
     BASE_DIR,
     CLOVA_API_KEY,
@@ -233,13 +234,13 @@ SP 결과: {clean_text(result)}
                 return self._ground_permit_result(result, permit_candidates, record_context_text, prompt)
             return result
         except Exception as exc:
-            self.last_error = str(exc)
-            print(f"[LLM_JUDGE_ERROR] {exc}")
+            self.last_error = str(service_error(exc))
+            if not allows_schema_fallback(exc):
+                raise service_error(exc) from exc
 
-            # Structured Outputs를 지원하지 않는 API 구성에서도 같은 JSON 프롬프트로
-            # 한 번 더 시도한다.
+            # Only explicit schema incompatibility / malformed model JSON gets
+            # one format fallback. Transport errors already used their budget.
             try:
-                self.call_count += 1
                 result = request_structured_response(
                     client=self.client,
                     model=self.model,
@@ -254,9 +255,8 @@ SP 결과: {clean_text(result)}
                     return self._ground_permit_result(result, permit_candidates, record_context_text, prompt)
                 return result
             except Exception as retry_exc:
-                self.last_error = str(retry_exc)
-                print(f"[LLM_JUDGE_RETRY_ERROR] {retry_exc}")
-                return None
+                self.last_error = str(service_error(retry_exc))
+                raise service_error(retry_exc) from retry_exc
 
         return None
 
@@ -283,7 +283,8 @@ SP 결과: {clean_text(result)}
                 self.permit_audit.append({"record_context": record_context, "repair": True,
                     "response": corrected.model_dump(), "candidates": [vars(c) for c in candidates], "grounded": grounded})
             except Exception as exc:
-                self.last_error = f"Permit grounding repair failed: {type(exc).__name__}"
+                self.last_error = str(service_error(exc))
+                raise service_error(exc) from exc
         answer = JudgeResponse.model_validate(grounded)
         answer._permit_evidence = grounded.get("permit_evidence", [])
         answer._permit_grounding_errors = grounded.get("grounding_errors", [])

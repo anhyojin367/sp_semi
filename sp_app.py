@@ -41,7 +41,7 @@ DEFAULT_GMAIL_SINCE = date(2026, 1, 1)
 GMAIL_CONFIRMATION_VERSION = "manual-gmail-confirm-20260602-v2"
 JUDGEMENT_STATUS_DIR = Path(__file__).resolve().parent / ".sp_judgement_status"
 JUDGEMENT_STATUS_INDEX = JUDGEMENT_STATUS_DIR / "status_index.json"
-APP_CACHE_VERSION = "sp-ui-cache-v110-final-review-progress"
+APP_CACHE_VERSION = "sp-ui-cache-v111-clova-bounded-retry"
 JUDGEMENT_STATUS_CACHE_VERSION = "sp-app-direct-bridge-v108-review-clarity"
 
 
