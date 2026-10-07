@@ -795,13 +795,13 @@ def _render_reason_box(ev, *, permit_view=EMPTY_VIEW) -> str:
     rows = getattr(ev, "lot_judgements", None) or []
     is_permit = permit_view.has_permit_basis(ev)
     is_permit_reason = getattr(ev, "source", "").startswith("permit_pdf")
-    raw_quotes = []
+    readable_quotes = []
 
     def display_basis(value):
         raw = clean_text(value)
         shown = permit_view.format_quote(raw) if is_permit else raw
-        if is_permit and raw != shown and raw not in raw_quotes:
-            raw_quotes.append(raw)
+        if is_permit and raw != shown and shown not in readable_quotes:
+            readable_quotes.append(shown)
         return _display_judgement_reason_text(shown)
 
     def display_reason(value, basis):
@@ -836,13 +836,16 @@ def _render_reason_box(ev, *, permit_view=EMPTY_VIEW) -> str:
         </div>
         """
 
-    if raw_quotes:
-        # Source quotations are available verbatim, separate from readable
-        # prose. Neither evaluation values nor evidence offsets are rewritten.
-        normalized += ('<details class="permit-raw-quote" style="margin-top:10px;color:#4b5563;">'
-                       '<summary style="cursor:pointer;">허가서 원문 추출 보기 (줄바꿈·문서 표기 포함)</summary>'
-                       + "".join('<pre style="white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;">'
-                                 + html_escape(q) + '</pre>' for q in raw_quotes) + '</details>')
+    if readable_quotes:
+        # Expanded excerpts use the same source-aware presentation as the
+        # main explanation. Raw criteria/evidence remain in the review data;
+        # the linked PDF is the authority for original pagination/layout.
+        normalized += ('<details class="permit-quote" style="margin-top:10px;color:#4b5563;">'
+                       '<summary style="cursor:pointer;">허가서 근거 문장 보기</summary>'
+                       '<p style="font-size:13px;">줄바꿈과 문서의 머리말·꼬리말을 정리한 표시입니다. '
+                       '원래 서식은 연결된 허가서 PDF에서 확인할 수 있습니다.</p>'
+                       + "".join('<blockquote style="margin:10px 0;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;">'
+                                 + html_escape(q) + '</blockquote>' for q in readable_quotes) + '</details>')
 
     return f"""
     <div style="margin-top:20px;padding:20px 22px;border-radius:16px;background:linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);border:1px solid #dbe3ea;border-left:6px solid #111827;">

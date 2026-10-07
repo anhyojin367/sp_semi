@@ -117,9 +117,9 @@ def test_all_reviewed_source_paragraphs_are_readable_and_auditable(corpus_view, 
     markup = _render_reason_box(ev, permit_view=view)
     assert asdict(ev) == before  # No mutation of thresholds, results or verdicts.
     if raw != shown:
-        assert 'class="permit-raw-quote"' in markup and html.escape(raw) in markup
-        visible = markup.split('<details class="permit-raw-quote"')[0]
-        assert "문서확인번호" not in visible
+        assert 'class="permit-quote"' in markup and html.escape(shown) in markup
+        assert "문서확인번호" not in markup
+        assert ev.normalized_criteria == raw  # Raw data is retained, not reprinted.
     assert html.escape(shown) in markup
 
 
@@ -174,7 +174,7 @@ def test_full_result_passes_source_view_to_nested_test_cards(corpus_view):
     result = SimpleNamespace(metadata=meta, tree=tree)
     before = deepcopy(result)
     markup = render_result_html(result)
-    assert "10⁶ cells/mL" in markup and 'class="permit-raw-quote"' in markup
+    assert "10⁶ cells/mL" in markup and 'class="permit-quote"' in markup
     assert result == before
 
 
@@ -211,7 +211,8 @@ def test_guarded_permit_keeps_typography_but_not_a_previous_pass_reason(corpus_v
     before = deepcopy(asdict(ev))
     markup = _render_reason_box(ev, permit_view=guarded_view)
     assert "10⁶ cells/mL" in markup and "적용 허가서 기준" in markup
-    assert 'class="permit-raw-quote"' in markup and html.escape(raw) in markup
+    assert 'class="permit-quote"' in markup and html.escape(guarded_view.format_quote(raw)) in markup
+    assert ev.normalized_criteria == raw
     assert "이전 충족 이유" not in markup
     assert "R14: 유효자릿수 불일치" in markup and "R13: 단위 확인: 106" in markup
     assert "정규화 시험결과: 106" in markup

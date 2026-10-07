@@ -46,9 +46,10 @@ def verify(input_dir: Path, output_dir: Path):
                 shown = view.format_quote(ev.normalized_criteria)
                 assert "문서확인번호" not in shown, (path.name, ev.test_name)
                 assert not re.search(r"(?m)^\s*\d+/\d+\s*$", shown), (path.name, ev.test_name)
-                # The original criterion remains in the collapsed audit quote.
+                # Expanded display is readable too; originals remain in the data.
                 if shown != ev.normalized_criteria.strip():
-                    assert 'class="permit-raw-quote"' in markup
+                    assert 'class="permit-quote"' in markup
+                assert "문서확인번호" not in markup
             if path.stem == "D00" or (path.stem in {"D06", "D09"} and ev.source == "md_policy_guard"):
                 node = TreeNode(key=f"test-{ev.order_idx}", title=ev.test_name or "시험", level=1,
                                 node_type="test", evaluation=ev)
@@ -68,7 +69,7 @@ def verify(input_dir: Path, output_dir: Path):
                 'background:#f5f7fb;margin:16px}section{margin:24px 0}</style>'
                 f'<h1>{path.stem} 저장 결과의 규칙 적용 시험</h1><p>새 API 판정이 아닙니다.</p>'
                 + "\n".join(sections) + '</html>', encoding="utf-8")
-        if path.stem in {"D07", "D08"}:
+        if path.stem in {"D00", "D07", "D08"}:
             result = SimpleNamespace(metadata=payload["metadata"], pdf_path=payload["pdf_path"],
                                      evaluations=[Evaluation(**item) for item in payload["evaluations"]])
             before = deepcopy(result)

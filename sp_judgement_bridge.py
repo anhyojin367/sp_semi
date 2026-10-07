@@ -28,6 +28,7 @@ from sp_pdf_judger.domain_details import resolve_domain_detail_profile
 from sp_pdf_judger.permit_catalog import resolve_submission_permits as resolve_permits
 from sp_pdf_judger.pipeline import DocumentJudgePipeline
 from sp_pdf_judger.clova_transport import ClovaServiceError, clova_request_context
+from sp_pdf_judger.permit_text_view import permit_view_for_result
 from sp_pdf_judger.policy_engine import policy_fingerprint
 from sp_pdf_judger.extraction_runtime import extraction_fingerprint
 from sp_pdf_judger.stage_csv_exporter import (
@@ -116,6 +117,7 @@ def _policy_evidence_links(result: Any, rule_id: str) -> str:
     if not audit:
         return ""
     permits = [Path(p) for p in result.metadata.get("permit_paths", [])]
+    permit_view = permit_view_for_result(result)
     links, quotes = {}, {}
     for evidence in audit.get("evidence", []):
         page = evidence.get("page")
@@ -132,6 +134,10 @@ def _policy_evidence_links(result: Any, rule_id: str) -> str:
         token = base64.urlsafe_b64encode(identity[0].encode()).decode().rstrip("=")
         links[identity] = f'<a href="/?view=pdf_viewer&amp;pdf={token}&amp;page={page}" target="_blank" rel="noopener noreferrer">{label} {page}쪽</a>'
         quote = str(evidence.get("quote") or "")
+        if label == "허가서":
+            # Presentation only. Keep the original evidence and PDF/page link;
+            # do not treat SP result rows or ratios as permit page furniture.
+            quote = permit_view.format_quote(quote)
         if quote and quote not in quotes.setdefault(identity, []):
             quotes[identity].append(quote)
     if not links:
@@ -139,7 +145,9 @@ def _policy_evidence_links(result: Any, rule_id: str) -> str:
     content = "".join(link + "".join('<blockquote style="white-space:pre-wrap;overflow-wrap:anywhere;">'
                      + html.escape(quote) + '</blockquote>' for quote in quotes.get(identity, []))
                      for identity, link in links.items())
-    return f'<details><summary>근거 원문 ({len(links)})</summary>{content}</details>'
+    return (f'<details class="policy-evidence"><summary>근거 문장 및 원문 PDF ({len(links)})</summary>'
+            '<p style="font-size:13px;">허가서 인용문은 줄바꿈과 문서의 머리말·꼬리말을 정리해 표시합니다. '
+            '각 쪽 링크에서 원본 PDF를 확인할 수 있습니다.</p>' + content + '</details>')
 
 
 # ============================================================
